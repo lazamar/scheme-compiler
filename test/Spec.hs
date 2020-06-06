@@ -34,3 +34,10 @@ main = hspec $ do
             it "float"                  $ lispValue "1.5"    $ Float 1.5
             it "float starts with dot"  $ lispValue ".5"     $ Float 0.5
 
+        describe "List" $ do
+            it "of values" $ lispValue "(1 2 3)" $ List [Number 1, Number 2, Number 3]
+            it "of lists"   $ lispValue "((2 3) (4 5))"
+                $ List [List [Number 2, Number 3] , List [Number 4, Number 5]]
+
+        describe "Dotted list" $ do
+            it "of values" $ lispValue "(1 2 . 3)" $ DottedList [Number 1, Number 2] (Number 3)

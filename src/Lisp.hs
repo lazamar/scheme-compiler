@@ -27,7 +27,9 @@ data LispVal
     | Char Char
     deriving (Eq, Show)
 
--- Parsers
+-- # Parsers
+
+-- ## Basic types
 
 readExpr :: String -> String
 readExpr input = case parse parseExpr "lisp" input of
@@ -39,6 +41,11 @@ parseExpr = parseString
         <|> try parseNumber
         <|> try parseChar
         <|> parseAtom
+        <|> parseQuoted
+        <|> do  char '('
+                x <- parseList
+                char ')'
+                return x
 
 symbol :: Parser Char
 symbol = oneOf "!#$%&|*+-/:<=>?@^_~"
@@ -114,3 +121,21 @@ parseNumber = withBase <|> float <|> floatOrInt
                 go pos (0:rest) = go (pos + 1) rest
                 go pos (1:rest) = go (pos + 1) rest . (+ 2^pos)
 
+-- ## Recursive types
+
+parseList :: Parser LispVal
+parseList = do
+    first  <- parseExpr
+    others <- many (try $ spaces >> parseExpr)
+    let head = first:others
+    dottedList head <|> return (List head)
+    where
+        dottedList head = do
+            tail <- spaces >> char '.' >> spaces >> parseExpr
+            return $ DottedList head tail
+
+parseQuoted :: Parser LispVal
+parseQuoted = do
+    char '\''
+    x <- parseExpr
+    return $ List [Atom "quote", x]
