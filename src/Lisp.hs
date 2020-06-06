@@ -22,7 +22,22 @@ data LispVal
     | String String
     | Bool Bool
     | Char Char
-    deriving (Eq, Show)
+    deriving (Eq)
+
+instance Show LispVal where
+    show = \case
+        String contents -> "\"" ++ contents ++ "\""
+        Atom name       -> name
+        Bool True       -> "#t"
+        Bool False      -> "#f"
+        Float val       -> show val
+        Number val      -> show val
+        Char val        -> "'" <> show val <> "'"
+        List contents   -> "(" ++ unwordsList contents ++ ")"
+        DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ show t ++ ")"
+        where
+            unwordsList :: [LispVal] -> String
+            unwordsList = unwords . map show
 
 -- # Parsers
 
@@ -31,7 +46,7 @@ data LispVal
 readExpr :: String -> String
 readExpr input = case parse parseExpr "lisp" input of
     Left err  -> "No match: " ++ show err
-    Right val -> "Found value: " <> show val
+    Right val -> "Found: " <> show val
 
 parseExpr :: Parser LispVal
 parseExpr = parseString
