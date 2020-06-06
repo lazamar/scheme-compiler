@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 922c509459b8c5b650eb843a830256df6940358aee86140f86363157d8df9f50
+-- hash: 791ac428f6d1d4b661870a8773ecf133ac89a243bbfabb43466cff896b9968de
 
 name:           write-you-a-scheme
 version:        0.1.0.0
@@ -32,6 +32,7 @@ library
       Paths_write_you_a_scheme
   hs-source-dirs:
       src
+  ghc-options: -Wall -Wno-unused-do-bind -Wincomplete-uni-patterns -Wincomplete-record-updates -Wmissing-exported-signatures -Wmissing-home-modules -Widentities -Wredundant-constraints -Wpartial-fields
   build-depends:
       QuickCheck
     , base >=4.7 && <5

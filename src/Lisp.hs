@@ -1,12 +1,9 @@
-{-# LANGUAGE BinaryLiterals #-}
-
 module Lisp where
 
-import Prelude
 import Text.ParserCombinators.Parsec hiding (spaces)
 import System.Environment
 import Data.Foldable (asum)
-import Numeric (readOct, readHex, readDec, readFloat)
+import Numeric (readOct, readHex, readFloat)
 
 runLisp :: IO ()
 runLisp  = do
@@ -56,10 +53,10 @@ spaces = skipMany1 space
 parseChar :: Parser LispVal
 parseChar = do
     string "#\\"
-    fmap Char $ space <|> newline <|> anyChar
+    fmap Char $ pspace <|> pnewline <|> anyChar
         where
-            space   = string "space" >> return ' '
-            newline = string "newline" >> return '\n'
+            pspace   = string "space" >> return ' '
+            pnewline = string "newline" >> return '\n'
 
 parseString :: Parser LispVal
 parseString = do
@@ -70,13 +67,13 @@ parseString = do
     where
         escaped = do
             char '\\'
-            quote <|> newline <|> tab <|> backslash
+            quote <|> pnewline <|> ptab <|> backslash
 
         quote     = char '"' >> return '"'
-        newline   = char 'n' >> return '\n'
-        tab       = char 't' >> return '\t'
+        pnewline  = char 'n' >> return '\n'
+        ptab      = char 't' >> return '\t'
         backslash = char '\\' >> return '\\'
-        notQuote = noneOf "\""
+        notQuote  = noneOf "\""
 
 
 parseAtom :: Parser LispVal
@@ -117,9 +114,11 @@ parseNumber = withBase <|> float <|> floatOrInt
         readBinary :: [Integer] -> Integer
         readBinary v = go 0 (reverse v) 0
             where
-                go pos []       = id
+                go :: Int -> [Integer] -> Integer -> Integer
                 go pos (0:rest) = go (pos + 1) rest
                 go pos (1:rest) = go (pos + 1) rest . (+ 2^pos)
+                go _   []       = id
+                go _ _          = error "Unexpected non-binary number"
 
 -- ## Recursive types
 
@@ -127,12 +126,12 @@ parseList :: Parser LispVal
 parseList = do
     first  <- parseExpr
     others <- many (try $ spaces >> parseExpr)
-    let head = first:others
-    dottedList head <|> return (List head)
+    let h = first:others
+    dottedList h <|> return (List h)
     where
-        dottedList head = do
-            tail <- spaces >> char '.' >> spaces >> parseExpr
-            return $ DottedList head tail
+        dottedList h = do
+            t <- spaces >> char '.' >> spaces >> parseExpr
+            return $ DottedList h t
 
 parseQuoted :: Parser LispVal
 parseQuoted = do
