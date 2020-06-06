@@ -13,16 +13,23 @@ main :: IO ()
 main = hspec $ do
     describe "Parses" $ do
         describe "Bool" $ do
-            it "true" $ lispValue "#t" $ Bool True
+            it "true"  $ lispValue "#t" $ Bool True
             it "false" $ lispValue "#f" $ Bool False
+
+        describe "Char" $ do
+            it "#\\space"    $ lispValue "#\\space"   $ Char ' '
+            it "#\\newline"  $ lispValue "#\\newline" $ Char '\n'
+            it "#\\A"        $ lispValue "#\\A"       $ Char 'A'
+            it "#\\2"        $ lispValue "#\\2"       $ Char '2'
+            it "#\\\\"       $ lispValue "#\\\\"      $ Char '\\'
 
         describe "String" $ do
             let quoted str = "\"" <> str <> "\""
-            it "no ecaped values" $ lispValue (quoted "Hello") $ String "Hello"
-            it "escaped tab" $ lispValue (quoted "\\t") $ String "\t"
-            it "escaped newline" $ lispValue (quoted "\\n") $ String "\n"
-            it "escaped quote" $ lispValue (quoted "\\\"") $ String "\""
-            it "escaped backslash" $ lispValue (quoted "\\\\") $ String "\\"
+            it "no ecaped values"   $ lispValue (quoted "Hello") $ String "Hello"
+            it "escaped tab"        $ lispValue (quoted "\\t")   $ String "\t"
+            it "escaped newline"    $ lispValue (quoted "\\n")   $ String "\n"
+            it "escaped quote"      $ lispValue (quoted "\\\"")  $ String "\""
+            it "escaped backslash"  $ lispValue (quoted "\\\\")  $ String "\\"
 
         describe "Number" $ do
             it "just digits"            $ lispValue "10"     $ Number 10
