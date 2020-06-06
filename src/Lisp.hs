@@ -1,10 +1,12 @@
-module Lisp
-    ( runLisp
-    ) where
+{-# LANGUAGE BinaryLiterals #-}
+
+module Lisp where
 
 import Prelude
 import Text.ParserCombinators.Parsec hiding (spaces)
 import System.Environment
+import Data.Foldable (asum)
+import Numeric (readOct, readHex, readDec)
 
 runLisp :: IO ()
 runLisp  = do
@@ -22,7 +24,7 @@ data LispVal
     | String String
     | Bool Bool
     | Char Char
-    deriving (Show)
+    deriving (Eq, Show)
 
 -- Parsers
 
@@ -33,7 +35,7 @@ readExpr input = case parse parseExpr "lisp" input of
 
 parseExpr :: Parser LispVal
 parseExpr = parseString
-        <|> parseNumber
+        <|> try parseNumber
         <|> try parseChar
         <|> parseAtom
 
@@ -80,4 +82,22 @@ parseAtom = do
         _    -> Atom atom
 
 parseNumber :: Parser LispVal
-parseNumber = Number . read <$> many1 digit
+parseNumber = Number <$> (withBase <|> plain)
+    where
+        withBase = do
+            char '#'
+            asum
+                [ char 'b' >> readBinary . fmap (read . pure) <$> many1 (oneOf "01")
+                , char 'o' >> fst . head . readOct <$> many1 (oneOf ['0'..'7'])
+                , char 'd' >> plain
+                , char 'x' >> fst . head . readHex <$> many1
+                    (oneOf $ ['0'..'9'] <> ['a'..'f'] <> ['A'..'F'])
+                ]
+        plain = read <$> many1 digit
+
+        readBinary :: [Integer] -> Integer
+        readBinary v = go 0 (reverse v) 0
+            where
+                go pos []       = id
+                go pos (0:rest) = go (pos + 1) rest
+                go pos (1:rest) = go (pos + 1) rest . (+ 2^pos)
