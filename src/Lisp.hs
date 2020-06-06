@@ -21,6 +21,7 @@ data LispVal
     | Number Integer
     | String String
     | Bool Bool
+    | Char Char
     deriving (Show)
 
 -- Parsers
@@ -31,13 +32,24 @@ readExpr input = case parse parseExpr "lisp" input of
     Right val -> "Found value: " <> show val
 
 parseExpr :: Parser LispVal
-parseExpr = parseAtom <|> parseString <|> parseNumber
+parseExpr = parseString
+        <|> parseNumber
+        <|> try parseChar
+        <|> parseAtom
 
 symbol :: Parser Char
 symbol = oneOf "!#$%&|*+-/:<=>?@^_~"
 
 spaces :: Parser ()
 spaces = skipMany1 space
+
+parseChar :: Parser LispVal
+parseChar = do
+    string "#\\"
+    fmap Char $ space <|> newline <|> anyChar
+        where
+            space   = string "space" >> return ' '
+            newline = string "newline" >> return '\n'
 
 parseString :: Parser LispVal
 parseString = do
