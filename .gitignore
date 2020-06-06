@@ -1,0 +1,5 @@
+.stack-work/
+*~
+scheme-parser
+*.hi
+*.o
