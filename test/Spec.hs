@@ -6,7 +6,7 @@ import Text.ParserCombinators.Parsec hiding (spaces)
 
 lispValue :: String -> LispVal -> Expectation
 lispValue str val =
-    parse parseExpr "lisp" str `shouldBe` Right val
+    (eval <$> parse parseExpr "lisp" str) `shouldBe` Right val
 
 
 main :: IO ()
@@ -41,3 +41,16 @@ main = hspec $ do
 
         describe "Dotted list" $ do
             it "of values" $ lispValue "(1 2 . 3)" $ DottedList [Number 1, Number 2] (Number 3)
+
+    describe "Basic operations" $ do
+            it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
+            it "* multiplies multiple numbers"      $ lispValue "(* 1 2 3 4)"       $ Number 24
+            it "- subtracts multiple numbers"       $ lispValue "(- 1 2 3 4)"       $ Number (-8)
+            it "/ divides multiple numbers"         $ lispValue "(/ 12 3 2)"        $ Number 2
+            it "mod multiple numbers"               $ lispValue "(mod 19 10 5)"     $ Number 4
+            it "quotient of multiple numbers"       $ lispValue "(quotient 19 2 2)" $ Number 4
+            it "string? returns True for string"    $ lispValue "(string? \"Hi\")"  $ Bool True
+            it "string? returns False for others"   $ lispValue "(string? 123)"     $ Bool False
+            it "number? returns True for Number"    $ lispValue "(number? 123)"     $ Bool True
+            it "number? returns True for Float"     $ lispValue "(number? .12)"     $ Bool True
+            it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False

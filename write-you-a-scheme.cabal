@@ -40,8 +40,6 @@ library
     , hspec-core
     , parsec
   default-language: Haskell2010
-  extensions:
-      LambdaCase
 
 executable write-you-a-scheme-exe
   main-is: Main.hs

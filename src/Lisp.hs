@@ -1,3 +1,6 @@
+{-# LANGUAGE LambdaCase     #-}
+{-# LANGUAGE TupleSections  #-}
+
 module Lisp where
 
 import Text.ParserCombinators.Parsec hiding (spaces)
@@ -6,10 +9,12 @@ import Data.Foldable (asum)
 import Numeric (readOct, readHex, readFloat)
 
 runLisp :: IO ()
-runLisp  = do
-    (expr:_) <- getArgs
-    putStrLn $ "Input expression: " <> expr
-    putStrLn (readExpr expr)
+runLisp = getArgs >>= print . eval . readExpr . head
+
+readExpr :: String -> LispVal
+readExpr input = case parse parseExpr "lisp" input of
+    Left err  -> String $ "No match: " ++ show err
+    Right val -> val
 
 -- Datatypes
 
@@ -42,11 +47,6 @@ instance Show LispVal where
 -- # Parsers
 
 -- ## Basic types
-
-readExpr :: String -> String
-readExpr input = case parse parseExpr "lisp" input of
-    Left err  -> "No match: " ++ show err
-    Right val -> "Found: " <> show val
 
 parseExpr :: Parser LispVal
 parseExpr = parseString
@@ -153,3 +153,64 @@ parseQuoted = do
     char '\''
     x <- parseExpr
     return $ List [Atom "quote", x]
+
+-- # Evaluation
+
+eval :: LispVal -> LispVal
+eval val = case val of
+    String _ -> val
+    Number _ -> val
+    Float _  -> val
+    Bool _   -> val
+    Char _   -> val
+    List [Atom "quote", v]  -> v
+    List (Atom func : args) -> apply func $ map eval args
+    List contents           -> List $ eval <$> contents
+    DottedList h t          -> DottedList (eval <$> h) (eval t)
+
+    Atom _       -> val
+    where
+        apply :: String -> [LispVal] -> LispVal
+        apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+
+primitives :: [(String, [LispVal] -> LispVal)]
+primitives =
+    [ ("+"          , numericBinop (+))
+    , ("-"          , numericBinop (-))
+    , ("*"          , numericBinop (*))
+    , ("/"          , numericBinop div)
+    , ("mod"        , numericBinop mod)
+    , ("quotient"   , numericBinop quot)
+    , ("remainder"  , numericBinop rem)
+    , unary "string?" stringOp
+    , unary "number?" numberOp
+    ]
+    where
+        numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+        numericBinop op params = Number $ foldl1 op $ map unpackNum params
+
+        unpackNum :: LispVal -> Integer
+        unpackNum (List [n]) = unpackNum n
+        unpackNum (Number n) = n
+        unpackNum (String n) =
+            let parsed = reads n :: [(Integer, String)]
+            in if null parsed then 0 else fst $ parsed !! 0
+        unpackNum _ = 0
+
+        stringOp (String _ ) = Bool True
+        stringOp _           = Bool False
+
+        numberOp (Number _ ) = Bool True
+        numberOp (Float _ )  = Bool True
+        numberOp _           = Bool False
+
+        unary :: String -> (LispVal -> LispVal) -> (String, [LispVal] -> LispVal)
+        unary op fun = (op,) $ \case
+            arg:[] -> fun arg
+            args   -> error $ unwords ["Wrong number of arguments to", op, ". Expected 1 argument, but was given", show (length args)]
+
+
+
+
+
+
