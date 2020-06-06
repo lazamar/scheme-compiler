@@ -3,18 +3,20 @@
 
 module Lisp where
 
-import Text.ParserCombinators.Parsec hiding (spaces)
-import System.Environment
-import Data.Foldable (asum)
+import Data.Either (fromRight)
+import Data.Foldable (foldlM, asum)
 import Numeric (readOct, readHex, readFloat)
+import System.Environment
+import Text.ParserCombinators.Parsec hiding (spaces)
+import Control.Monad ((>=>))
 
 runLisp :: IO ()
-runLisp = getArgs >>= print . eval . readExpr . head
+runLisp = getArgs >>= print . (readExpr >=> eval) . head
 
-readExpr :: String -> LispVal
+readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
-    Left err  -> String $ "No match: " ++ show err
-    Right val -> val
+     Left err  -> throwError $ Parser err
+     Right val -> return val
 
 -- Datatypes
 
@@ -40,9 +42,9 @@ instance Show LispVal where
         Char val        -> "'" <> show val <> "'"
         List contents   -> "(" ++ unwordsList contents ++ ")"
         DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ show t ++ ")"
-        where
-            unwordsList :: [LispVal] -> String
-            unwordsList = unwords . map show
+
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map show
 
 -- # Parsers
 
@@ -156,68 +158,107 @@ parseQuoted = do
 
 -- # Evaluation
 
-eval :: LispVal -> LispVal
+data LispError
+    = NumArgs Integer [LispVal]
+    | TypeMismatch String LispVal
+    | Parser ParseError
+    | BadSpecialForm String LispVal
+    | NotFunction String String
+    | UnboundVar String String
+    | Default String
+    deriving (Eq)
+
+instance Show LispError where
+    show = unwords . \case
+        UnboundVar message varname  -> [message, ":", varname]
+        BadSpecialForm message form -> [message, ":", show form]
+        NotFunction message func    -> [message, ":", show func]
+        NumArgs expected found      -> ["Expected", show expected," args; found values ", unwordsList found]
+        TypeMismatch expected found -> ["Invalid type: expected", expected, ", found", show found]
+        Parser parseErr             -> ["Parse error at ", show parseErr]
+        Default _                   -> ["Default?"]
+
+type ThrowsError = Either LispError
+
+eval :: LispVal -> ThrowsError LispVal
 eval val = case val of
-    String _ -> val
-    Number _ -> val
-    Float _  -> val
-    Bool _   -> val
-    Char _   -> val
-    List [Atom "quote", v]  -> v
-    List (Atom func : args) -> apply func $ map eval args
-    List contents           -> List $ eval <$> contents
-    DottedList h t          -> DottedList (eval <$> h) (eval t)
+    String _ -> return val
+    Number _ -> return val
+    Float _  -> return val
+    Bool _   -> return val
+    Char _   -> return val
+    List [Atom "quote", v]  -> return v
+    List (Atom func : args) -> apply func =<< traverse eval args
+    List contents           -> List <$> traverse eval contents
+    DottedList h t          -> DottedList <$> (traverse eval h) <*> (eval t)
 
-    Atom _       -> val
+    Atom _       -> return val
     where
-        apply :: String -> [LispVal] -> LispVal
-        apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+        apply :: String -> [LispVal] -> ThrowsError LispVal
+        apply func args = case lookup func primitives of
+            Nothing -> throwError $ NotFunction "Unrecognized primitive function args" func
+            Just f  -> f args
 
-primitives :: [(String, [LispVal] -> LispVal)]
+primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
-    [ ("+"          , numericBinop (+))
-    , ("-"          , numericBinop (-))
-    , ("*"          , numericBinop (*))
-    , ("/"          , numericBinop div)
-    , ("mod"        , numericBinop mod)
-    , ("quotient"   , numericBinop quot)
-    , ("remainder"  , numericBinop rem)
-    , unary "string?" stringOp
-    , unary "number?" numberOp
-    , unary "symbol?" symbolOp
+    [ ("+"          , twoOrMore $ onNumbers (+))
+    , ("-"          , twoOrMore $ onNumbers (-))
+    , ("*"          , twoOrMore $ onNumbers (*))
+    , ("/"          , twoOrMore $ onNumbers div)
+    , ("mod"        , binary $ onNumbers mod   )
+    , ("quotient"   , binary $ onNumbers quot  )
+    , ("remainder"  , binary $ onNumbers rem   )
+    , ("string?"    , unary stringOp           )
+    , ("number?"    , unary numberOp           )
+    , ("symbol?"    , unary symbolOp           )
     ]
     where
-        numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
-        numericBinop op params = Number $ foldl1 op $ map unpackNum params
+        onNumbers :: (Integer -> Integer -> Integer) -> (LispVal -> LispVal -> ThrowsError LispVal)
+        onNumbers fun arg1 arg2 = fmap Number $ fun <$> unpackNum arg1 <*> unpackNum arg2
 
-        unpackNum :: LispVal -> Integer
-        unpackNum (List [n]) = unpackNum n
-        unpackNum (Number n) = n
-        unpackNum (String n) =
-            let parsed = reads n :: [(Integer, String)]
-            in if null parsed then 0 else fst $ parsed !! 0
-        unpackNum _ = 0
+        unpackNum :: LispVal -> ThrowsError Integer
+        unpackNum = \case
+            List [n] -> unpackNum n
+            Number n -> return n
+            val      -> throwError $ TypeMismatch "Number" val
 
-        stringOp = \case
+        stringOp = return . \case
             String _ -> Bool True
             _        -> Bool False
 
-        numberOp = \case
+        numberOp = return . \case
             Number _ -> Bool True
             Float _  -> Bool True
             _        -> Bool False
 
-        symbolOp = \case
+        symbolOp = return . \case
             Atom _  -> Bool True
             _       -> Bool False
 
-        unary :: String -> (LispVal -> LispVal) -> (String, [LispVal] -> LispVal)
-        unary op fun = (op,) $ \case
+        unary :: (LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+        unary fun = \case
             arg:[] -> fun arg
-            args   -> error $ unwords ["Wrong number of arguments to", op, ". Expected 1 argument, but was given", show (length args)]
+            args   -> throwError $ NumArgs 1 args
 
+        binary :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+        binary fun = \case
+            arg1:arg2:[] -> fun arg1 arg2
+            args   -> throwError $ NumArgs 2 args
 
+        twoOrMore :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+        twoOrMore fun = \case
+            args@[]  -> throwError $ NumArgs 2 args
+            args@[_] -> throwError $ NumArgs 2 args
+            arg:rest -> foldlM fun arg rest
 
+catchError :: Either a b -> (a -> Either a b) -> Either a b
+catchError e f = either f return e
 
+throwError :: e -> Either e a
+throwError = Left
 
+trapError :: Show a => Either a String -> Either a String
+trapError action = catchError action (return . show)
 
+extractValue :: ThrowsError a -> a
+extractValue = fromRight undefined
