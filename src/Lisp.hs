@@ -6,7 +6,7 @@ import Prelude
 import Text.ParserCombinators.Parsec hiding (spaces)
 import System.Environment
 import Data.Foldable (asum)
-import Numeric (readOct, readHex, readDec)
+import Numeric (readOct, readHex, readDec, readFloat)
 
 runLisp :: IO ()
 runLisp  = do
@@ -21,6 +21,7 @@ data LispVal
     | List [LispVal]
     | DottedList [LispVal] LispVal
     | Number Integer
+    | Float Double
     | String String
     | Bool Bool
     | Char Char
@@ -82,18 +83,29 @@ parseAtom = do
         _    -> Atom atom
 
 parseNumber :: Parser LispVal
-parseNumber = Number <$> (withBase <|> plain)
+parseNumber = withBase <|> float <|> floatOrInt
     where
         withBase = do
             char '#'
-            asum
+            Number <$> asum
                 [ char 'b' >> readBinary . fmap (read . pure) <$> many1 (oneOf "01")
                 , char 'o' >> fst . head . readOct <$> many1 (oneOf ['0'..'7'])
-                , char 'd' >> plain
+                , char 'd' >> read <$> many1 digit
                 , char 'x' >> fst . head . readHex <$> many1
                     (oneOf $ ['0'..'9'] <> ['a'..'f'] <> ['A'..'F'])
                 ]
-        plain = read <$> many1 digit
+
+        float = fromDot ""
+
+        floatOrInt = do
+            predot <- many1 digit
+            fromDot predot <|> return (Number $ read predot)
+
+        fromDot :: String -> Parser LispVal
+        fromDot predot = do
+            char '.'
+            postdot <- many1 digit
+            return  $ Float $ fst . head . readFloat $ '0':predot <> "." <> postdot
 
         readBinary :: [Integer] -> Integer
         readBinary v = go 0 (reverse v) 0
@@ -101,3 +113,4 @@ parseNumber = Number <$> (withBase <|> plain)
                 go pos []       = id
                 go pos (0:rest) = go (pos + 1) rest
                 go pos (1:rest) = go (pos + 1) rest . (+ 2^pos)
+
