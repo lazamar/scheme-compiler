@@ -184,6 +184,7 @@ primitives =
     , ("remainder"  , numericBinop rem)
     , unary "string?" stringOp
     , unary "number?" numberOp
+    , unary "symbol?" symbolOp
     ]
     where
         numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
@@ -197,12 +198,18 @@ primitives =
             in if null parsed then 0 else fst $ parsed !! 0
         unpackNum _ = 0
 
-        stringOp (String _ ) = Bool True
-        stringOp _           = Bool False
+        stringOp = \case
+            String _ -> Bool True
+            _        -> Bool False
 
-        numberOp (Number _ ) = Bool True
-        numberOp (Float _ )  = Bool True
-        numberOp _           = Bool False
+        numberOp = \case
+            Number _ -> Bool True
+            Float _  -> Bool True
+            _        -> Bool False
+
+        symbolOp = \case
+            Atom _  -> Bool True
+            _       -> Bool False
 
         unary :: String -> (LispVal -> LispVal) -> (String, [LispVal] -> LispVal)
         unary op fun = (op,) $ \case

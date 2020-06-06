@@ -49,6 +49,9 @@ main = hspec $ do
         describe "Dotted list" $ do
             it "of values" $ lispValue "(1 2 . 3)" $ DottedList [Number 1, Number 2] (Number 3)
 
+        describe "Atom" $ do
+            it "identifier"  $ lispValue "hello" $ Atom "hello"
+
     describe "Basic operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
             it "* multiplies multiple numbers"      $ lispValue "(* 1 2 3 4)"       $ Number 24
@@ -61,3 +64,5 @@ main = hspec $ do
             it "number? returns True for Number"    $ lispValue "(number? 123)"     $ Bool True
             it "number? returns True for Float"     $ lispValue "(number? .12)"     $ Bool True
             it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False
+            it "symbol? is True for identifiers"    $ lispValue "(symbol? hello)"   $ Bool True
+            it "symbol? is False for primitives"    $ lispValue "(symbol? 123)"     $ Bool False
