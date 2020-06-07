@@ -102,6 +102,13 @@ main = hspec $ do
                 it "evaluates third argument if false"            $ lispValue "(if #f 1 2)" $ Number 2
                 it "errors with non-boolean values as predicate"  $ lispThrows "(if 5 1 2)" isTypeMismatch
 
+            describe "cond statement" $ do
+                it "matches first clause"                  $ lispValue "(cond (#t 2))"          $ Number 2
+                it "matches second clause"                 $ lispValue "(cond (#f 1) (#t 2))"   $ Number 2
+                it "evaluates predicates"                  $ lispValue "(cond ((eqv? 1 (- 5 4)) 1) (#t 2))" $ Number 2
+                it "falls to else if no predicate is true" $ lispValue "(cond (#f 1) (else 2))" $ Number 2
+                it "throws it there is no match or else "  $ lispThrows "(cond (#f 1))"         $ isDefault
+
             describe "List" $ do
                 describe "car" $ do
                     it "on multiple element list" $ lispValue "(car '(1 2 3))"    $ Number 1

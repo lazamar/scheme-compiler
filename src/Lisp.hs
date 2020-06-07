@@ -203,6 +203,7 @@ eval val = case val of
     List (Atom "eqv?" : args)                -> eqv args
     List (Atom "eq?"  : args)                -> eqv args
     List (Atom "equal?" : args)              -> equal args
+    List (Atom "cond" : args)                -> cond args
     List (Atom func   : args)                -> apply func =<< traverse eval args
     List contents                            -> List <$> traverse eval contents
     DottedList h t                           -> DottedList <$> (traverse eval h) <*> (eval t)
@@ -256,6 +257,19 @@ eval val = case val of
             let eqvEqual = eqv' a b
             return $ Bool $ primitiveEq || eqvEqual
 
+        cond = \case
+            []                   -> throwError $ Default "No clauses matched in conditional"
+            [List [Atom "else", alt]] -> eval alt
+            clause:rest          -> case clause of
+                List vals -> flip binary vals $ \predicate conseq -> do
+                    p <- eval predicate
+                    if eqv' p (Bool True)
+                       then eval conseq
+                       else cond rest
+
+                _ -> throwError $ TypeMismatch "List" clause
+
+
 
 data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
 
@@ -267,9 +281,7 @@ data Coerced a
 unpackEqual :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
 unpackEqual v1 v2 (AnyUnpacker unpack)
     = catchError (const $ return False)
-    $ (==) <$> deepUnpack' unpack v1 <*> deepUnpack' unpack v2
-
-deepUnpack' unpack val = deepUnpack val
+    $ (==) <$> deepUnpack v1 <*> deepUnpack v2
     where
         deepUnpack v = case v of
             Atom _         -> CVal <$> unpack v
