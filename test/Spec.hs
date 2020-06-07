@@ -36,6 +36,17 @@ isNotFunction    = "NotFunction"
 isUnboundVar     = "UnboundVar"
 isDefault        = "Default"
 
+-- | Gets the name of the constructor
+lispConstructor ::  LispVal -> String
+lispConstructor = \case
+    Atom _          -> "Atom"
+    List  _         -> "List"
+    DottedList _ _  -> "DottedList"
+    Number _        -> "Number"
+    String _        -> "String"
+    Bool _          -> "Bool"
+    Char _          -> "Char"
+
 main :: IO ()
 main = hspec $ do
     describe "Parses" $ do
@@ -116,10 +127,18 @@ main = hspec $ do
                     it "cons item to non-list"          $ lispValue "(cons 1 2)"        $ DottedList [Number 1] (Number 2)
                     it "throws if given more arguments" $ lispThrows "(cons 1 2 3)"     isNumArgs
 
-        --    describe "Equality" $ do
-        --        describe "Strict" $ do
-        --            it "recognises equal values" $
-        --                property $ \x -> lispValue (call "eqv?" [x, x]) $ Bool True
+            describe "Equality" $ do
+                describe "strong" $ do
+                    it "recognises equal values" $ property $ \x -> lispValue (call "eqv?" [x, x]) $ Bool True
+                    it "doesn't say values with different constructors are equal"
+                        $ property $ \x y -> lispValue (call "eqv?" [x, y]) $ Bool $ x == y
+
+                describe "weak" $ do
+                    it "recognises equal values" $ property $ \x -> lispValue (call "equal?" [x, x]) $ Bool True
+                    it "recognises values that can be coerced" $ do
+                        lispValue "(equal? #t 2)"    $ Bool True
+                        lispValue "(equal? '(2) 2)"  $ Bool True
+                        lispValue "(equal? \"2\" 2)" $ Bool True
 
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
@@ -160,7 +179,7 @@ main = hspec $ do
 
 -- | Produce scheme code to call a function with given args
 call :: String -> [LispVal] -> String
-call fname args = show $ List $ Atom fname : args
+call fname args = toScheme $ List $ Atom fname : args
 
 instance Arbitrary LispVal where
     arbitrary = sized lisp

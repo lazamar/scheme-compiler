@@ -1,8 +1,6 @@
 {-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE TupleSections  #-}
-{-# LANGUAGE BlockArguments  #-}
-{-# LANGUAGE RankNTypes  #-}
-{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE ExistentialQuantification  #-}
 
 module Lisp where
 
@@ -33,6 +31,7 @@ data LispVal
     | Char Char
     deriving (Eq, Show)
 
+-- | This is the inverse of parsing
 toScheme :: LispVal -> String
 toScheme = \case
     String contents -> "\"" ++ contents ++ "\""
@@ -202,6 +201,7 @@ eval val = case val of
     List (Atom "cons" : args)                -> cons args
     List (Atom "eqv?" : args)                -> eqv args
     List (Atom "eq?"  : args)                -> eqv args
+    List (Atom "equal?" : args)              -> equal args
     List (Atom func   : args)                -> apply func =<< traverse eval args
     List contents                            -> List <$> traverse eval contents
     DottedList h t                           -> DottedList <$> (traverse eval h) <*> (eval t)
@@ -235,66 +235,63 @@ eval val = case val of
             other                  -> return $ DottedList [new] other
 
         eqv = binary $ on return Bool eqv'
-            where
-                eqv' :: LispVal -> LispVal -> Bool
-                eqv' a b = case (a,b) of
-                    (Bool arg1      , Bool arg2  )     -> arg1 == arg2
-                    (Number arg1    , Number arg2)     -> arg1 == arg2
-                    (Char arg1      , Char arg2  )     -> arg1 == arg2
-                    (String arg1    , String arg2)     -> arg1 == arg2
-                    (Atom arg1      , Atom arg2  )     -> arg1 == arg2
-                    (DottedList xs x, DottedList ys y) -> eqv' (List $ xs ++ [x]) (List $ ys ++ [y])
-                    (List arg1, List arg2) ->
-                        let eqvPair (x1, x2) = eqv' x1 x2
-                        in (length arg1 == length arg2) && (all eqvPair $ zip arg1 arg2)
-                    (_, _) -> False
+
+        eqv' :: LispVal -> LispVal -> Bool
+        eqv' a b = case (a,b) of
+            (Bool arg1      , Bool arg2  )     -> arg1 == arg2
+            (Number arg1    , Number arg2)     -> arg1 == arg2
+            (Char arg1      , Char arg2  )     -> arg1 == arg2
+            (String arg1    , String arg2)     -> arg1 == arg2
+            (Atom arg1      , Atom arg2  )     -> arg1 == arg2
+            (DottedList xs x, DottedList ys y) -> eqv' (List $ xs ++ [x]) (List $ ys ++ [y])
+            (List arg1, List arg2) ->
+                let eqvPair (x1, x2) = eqv' x1 x2
+                in (length arg1 == length arg2) && (all eqvPair $ zip arg1 arg2)
+            (_, _) -> False
+
+        equal = binary $ \a b -> do
+            primitiveEq <- or <$> traverse (unpackEqual a b) [AnyUnpacker asNum, AnyUnpacker asBool, AnyUnpacker asStr]
+            let eqvEqual = eqv' a b
+            return $ Bool $ primitiveEq || eqvEqual
+
+
+data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
+
+unpackEqual :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
+unpackEqual v1 v2 (AnyUnpacker f)
+    = catchError (const $ return False)
+    $ (==) <$> f v1 <*> f v2
+
+
 
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
-    [ ("+"          , twoOrMore $ on num Number (+))
-    , ("-"          , twoOrMore $ on num Number (-))
-    , ("*"          , twoOrMore $ on num Number (*))
-    , ("/"          , twoOrMore $ on num Number div)
-    , ("="          , binary $ on num Bool (==))
-    , ("<"          , binary $ on num Bool (<))
-    , (">"          , binary $ on num Bool (>))
-    , ("/="         , binary $ on num Bool (/=))
-    , (">="         , binary $ on num Bool (>=))
-    , ("<="         , binary $ on num Bool (<=))
-    , ("&&"         , binary $ on bool Bool (&&))
-    , ("||"         , binary $ on bool Bool (||))
-    , ("string=?"   , binary $ on str Bool (==))
-    , ("string<?"   , binary $ on str Bool (<))
-    , ("string>?"   , binary $ on str Bool (>))
-    , ("string<=?"  , binary $ on str Bool (<=))
-    , ("string>=?"  , binary $ on str Bool (>=))
-    , ("mod"        , binary $ on num Number mod)
-    , ("quotient"   , binary $ on num Number quot)
-    , ("remainder"  , binary $ on num Number rem )
+    [ ("+"          , twoOrMore $ on asNum Number (+))
+    , ("-"          , twoOrMore $ on asNum Number (-))
+    , ("*"          , twoOrMore $ on asNum Number (*))
+    , ("/"          , twoOrMore $ on asNum Number div)
+    , ("="          , binary $ on asNum Bool (==))
+    , ("<"          , binary $ on asNum Bool (<))
+    , (">"          , binary $ on asNum Bool (>))
+    , ("/="         , binary $ on asNum Bool (/=))
+    , (">="         , binary $ on asNum Bool (>=))
+    , ("<="         , binary $ on asNum Bool (<=))
+    , ("&&"         , binary $ on asBool Bool (&&))
+    , ("||"         , binary $ on asBool Bool (||))
+    , ("string=?"   , binary $ on asStr Bool (==))
+    , ("string<?"   , binary $ on asStr Bool (<))
+    , ("string>?"   , binary $ on asStr Bool (>))
+    , ("string<=?"  , binary $ on asStr Bool (<=))
+    , ("string>=?"  , binary $ on asStr Bool (>=))
+    , ("mod"        , binary $ on asNum Number mod)
+    , ("quotient"   , binary $ on asNum Number quot)
+    , ("remainder"  , binary $ on asNum Number rem )
     , ("string?"    , unary stringOp)
     , ("number?"    , unary numberOp)
     , ("symbol?"    , unary symbolOp)
     ]
     where
-        num :: LispVal -> ThrowsError Integer
-        num = \case
-            List [n] -> num n
-            Number n -> return n
-            val      -> throwError $ TypeMismatch "Number" val
-
-        bool :: LispVal -> ThrowsError Bool
-        bool = \case
-            List [n] -> bool n
-            Bool n   -> return n
-            val      -> throwError $ TypeMismatch "Bool" val
-
-        str :: LispVal -> ThrowsError String
-        str = \case
-            String v -> return v
-            Number v -> return $ show v
-            Bool v   -> return $ show v
-            val      -> throwError $ TypeMismatch "String" val
 
         stringOp = return . \case
             String _ -> Bool True
@@ -330,14 +327,33 @@ binary fun = \case
     arg1:arg2:[] -> fun arg1 arg2
     args   -> throwError $ NumArgs 2 args
 
-catchError :: Either a b -> (a -> Either a b) -> Either a b
-catchError e f = either f return e
+asNum :: LispVal -> ThrowsError Integer
+asNum = \case
+    List [n] -> asNum n
+    Number n -> return n
+    val      -> throwError $ TypeMismatch "Number" val
+
+asBool :: LispVal -> ThrowsError Bool
+asBool = \case
+    List [n] -> asBool n
+    Bool n   -> return n
+    _        -> return True
+
+asStr :: LispVal -> ThrowsError String
+asStr = \case
+    String v -> return v
+    Number v -> return $ show v
+    Bool v   -> return $ show v
+    val      -> throwError $ TypeMismatch "String" val
+
+catchError :: (a -> Either a b) -> Either a b -> Either a b
+catchError f e = either f return e
 
 throwError :: e -> Either e a
 throwError = Left
 
 trapError :: Show a => Either a String -> Either a String
-trapError action = catchError action (return . show)
+trapError = catchError (return . show)
 
 extractValue :: ThrowsError a -> a
 extractValue = fromRight undefined
