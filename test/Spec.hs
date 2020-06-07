@@ -98,9 +98,9 @@ main = hspec $ do
     describe "Evaluates" $ do
         describe "Standard functions" $ do
             describe "if statement" $ do
-                it "evaluates second argument if true"      $ lispValue "(if #t 1 2)" $ Number 1
-                it "evaluates third argument if false"      $ lispValue "(if #f 1 2)" $ Number 2
-                it "considers non-boolean values as true"   $ lispValue "(if 5 1 2)"  $ Number 1
+                it "evaluates second argument if true"            $ lispValue "(if #t 1 2)" $ Number 1
+                it "evaluates third argument if false"            $ lispValue "(if #f 1 2)" $ Number 2
+                it "errors with non-boolean values as predicate"  $ lispThrows "(if 5 1 2)" isTypeMismatch
 
             describe "List" $ do
                 describe "car" $ do

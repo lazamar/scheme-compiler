@@ -214,7 +214,8 @@ eval val = case val of
 
         ifFun predicate conseq alt = eval predicate >>= \case
             Bool False -> eval alt
-            _          -> eval conseq
+            Bool True -> eval conseq
+            arg       -> throwError $ TypeMismatch "boolean" arg
 
         car = unary $ \case
             List (Atom "quote":xs) -> car xs
