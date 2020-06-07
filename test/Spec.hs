@@ -2,21 +2,22 @@
 {-# LANGUAGE TupleSections  #-}
 import Test.Hspec
 import Test.Hspec
-import Test.QuickCheck (oneof, Arbitrary(..), property, Gen)
+import Test.QuickCheck (oneof, Arbitrary(..), property, Gen, listOf, listOf1, elements, sized)
 import Lisp hiding (runLisp)
 import Text.ParserCombinators.Parsec hiding (spaces, oneOf)
 import Data.Bifunctor (first)
+import Debug.Trace
 
-runLisp :: String -> ThrowsError LispVal
-runLisp str = do
+runLisp' :: String -> ThrowsError LispVal
+runLisp' str = do
     parsed <- first Parser $ parse parseExpr "lisp" str
     eval parsed
 
 lispValue :: String -> LispVal -> Expectation
-lispValue str val = runLisp str `shouldBe` Right val
+lispValue str val = runLisp' str `shouldBe` Right val
 
 lispThrows ::  String -> String -> Expectation
-lispThrows str err = first errorConstructor (runLisp str) `shouldBe` Left err
+lispThrows str err = first errorConstructor (runLisp' str) `shouldBe` Left err
     where
         errorConstructor = \case
             NumArgs _ _         -> isNumArgs
@@ -48,6 +49,8 @@ main = hspec $ do
             it "#\\A"        $ lispValue "#\\A"       $ Char 'A'
             it "#\\2"        $ lispValue "#\\2"       $ Char '2'
             it "#\\\\"       $ lispValue "#\\\\"      $ Char '\\'
+            it "#\\s"        $ lispValue "#\\s"       $ Char 's'
+            it "#\\n"        $ lispValue "#\\n"       $ Char 'n'
 
         describe "String" $ do
             let quoted str = "\"" <> str <> "\""
@@ -64,9 +67,6 @@ main = hspec $ do
             it "octal"                  $ lispValue "#o12"   $ Number 10
             it "hexadecimal capital"    $ lispValue "#xA"    $ Number 10
             it "hexadecimal lower case" $ lispValue "#xa"    $ Number 10
-            it "float"                  $ lispValue "1.5"    $ Float 1.5
-            it "float starts with dot"  $ lispValue ".5"     $ Float 0.5
-            it "negative float"         $ lispValue "-2.5"   $ Float (-2.5)
 
         describe "List" $ do
             it "of values"  $ lispValue "(1 2 3)" $ List [Number 1, Number 2, Number 3]
@@ -80,6 +80,9 @@ main = hspec $ do
 
         describe "Atom" $ do
             it "identifier"  $ lispValue "hello" $ Atom "hello"
+
+        describe "toScheme" $ do
+            it "is the inverse of readExpr" $ property $ \x -> readExpr (toScheme x) `shouldBe` Right x
 
     describe "Evaluates" $ do
         describe "Standard functions" $ do
@@ -128,7 +131,6 @@ main = hspec $ do
             it "string? returns True for string"    $ lispValue "(string? \"Hi\")"  $ Bool True
             it "string? returns False for others"   $ lispValue "(string? 123)"     $ Bool False
             it "number? returns True for Number"    $ lispValue "(number? 123)"     $ Bool True
-            it "number? returns True for Float"     $ lispValue "(number? .12)"     $ Bool True
             it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False
             it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False
             it "symbol? is True for identifiers"    $ lispValue "(symbol? hello)"   $ Bool True
@@ -161,17 +163,46 @@ call :: String -> [LispVal] -> String
 call fname args = show $ List $ Atom fname : args
 
 instance Arbitrary LispVal where
-    arbitrary = oneof
-        [ List <$> arbitrary
-        , DottedList <$> nonEmpty <*> arbitrary
-        , Number <$> arbitrary
-        , Float <$> arbitrary
-        , String <$> nonEmpty
-        , Bool <$> arbitrary
-        , Char <$> arbitrary
-        -- Atom <$> arbitrary -- Commented out to avoid the generator calling random functions
-        ]
+    arbitrary = sized lisp
         where
-            nonEmpty :: Arbitrary a => Gen [a]
-            nonEmpty = (:) <$> arbitrary <*> arbitrary
+            lisp depth =
+                if depth == 0
+                   then oneof nonRecursive
+                   else oneof $ recursive <> nonRecursive
+                where
+                    next = lisp $ (min depth maxDepth) - 1
+
+                    maxDepth = 2
+
+                    recursive =
+                        [ List <$> listOf next
+                        , DottedList <$> listOf1 next <*> next
+                        ]
+                    nonRecursive =
+                        [ Number <$> arbitrary
+                        , String  <$> listOf charsAllowed
+                        , Bool <$> arbitrary
+                        , Char <$> charsAllowed
+                        , Atom <$> ((:) <$> letter <*> listOf (oneof [ letter, digit ]))
+                        ]
+
+                    letter = elements $ ['a'..'z'] <> ['A'..'Z']
+                    digit  = elements ['0'..'9']
+
+                    charsAllowed = elements $ filter (not . (`elem` "\\")) $ take 79 ['0'..]
+
+crop depth val = if depth > 3 then Atom "end" else case val of
+    List args -> List $ c <$> take 3 args
+    DottedList h t  -> DottedList (c <$> take 3 h) (c t)
+    Number _        -> val
+    String  _       -> val
+    Bool _          -> val
+    Char _          -> val
+    Atom _          -> val
+    where
+        c = crop newDepth
+        newDepth = depth + 1
+
+
+
 

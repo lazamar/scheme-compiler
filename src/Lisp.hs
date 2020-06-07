@@ -8,7 +8,7 @@ module Lisp where
 
 import Data.Either (fromRight)
 import Data.Foldable (foldlM, asum)
-import Numeric (readOct, readHex, readFloat)
+import Numeric (readOct, readHex)
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad ((>=>))
@@ -28,7 +28,6 @@ data LispVal
     | List [LispVal]
     | DottedList [LispVal] LispVal
     | Number Integer
-    | Float Double
     | String String
     | Bool Bool
     | Char Char
@@ -40,15 +39,14 @@ toScheme = \case
     Atom name       -> name
     Bool True       -> "#t"
     Bool False      -> "#f"
-    Float val       -> show val
     Number val      -> show val
-    Char val        -> "'" <> show val <> "'"
+    Char val        -> "#\\" <> [val] <> ""
     List contents   -> "(" ++ unwordsList contents ++ ")"
-    DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ show t ++ ")"
+    DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ toScheme t ++ ")"
 
 
 unwordsList :: [LispVal] -> String
-unwordsList = unwords . map show
+unwordsList = unwords . map toScheme
 
 -- # Parsers
 
@@ -76,8 +74,8 @@ parseChar = do
     string "#\\"
     fmap Char $ pspace <|> pnewline <|> anyChar
         where
-            pspace   = string "space" >> return ' '
-            pnewline = string "newline" >> return '\n'
+            pspace   = try $ string "space" >> return ' '
+            pnewline = try $ string "newline" >> return '\n'
 
 parseString :: Parser LispVal
 parseString = do
@@ -108,14 +106,14 @@ parseAtom = do
         _    -> Atom atom
 
 parseNumber :: Parser LispVal
-parseNumber = withBase <|>  try float <|> try integer
+parseNumber = withBase <|> try integer
     where
         withBase = do
             char '#'
             Number <$> asum
                 [ char 'b' >> sign >>= \m -> m . readBinary . fmap (read . pure) <$> many1 (oneOf "01")
                 , char 'o' >> sign >>= \m -> m . fst . head . readOct <$> many1 (oneOf ['0'..'7'])
-                , char 'd' >> sign >>= \m -> m . read <$> many1 digit
+                , char 'd' >> decimal
                 , char 'x' >> sign >>= \m -> m . fst . head . readHex <$> many1
                     (oneOf $ ['0'..'9'] <> ['a'..'f'] <> ['A'..'F'])
                 ]
@@ -123,13 +121,17 @@ parseNumber = withBase <|>  try float <|> try integer
         sign :: Num a => Parser (a -> a)
         sign = (char '-' >> return negate) <|> return id
 
-        integer = fmap Number $ sign <*> fmap read (many1 digit)
+        -- 10e-7
+        eNotation :: Parser Integer
+        eNotation = (char 'e' >> (sign <*> fmap read (many1 digit))) <|> return 1
 
-        float = fmap Float $ sign <*> do
-            predot <- many digit
-            char '.'
-            postdot <- many1 digit
-            return  $ fst . head . readFloat $ '0':predot <> "." <> postdot
+        integer = fmap Number decimal
+
+        decimal = do
+            m <- sign
+            nums <- fmap read (many1 digit)
+            power <- eNotation
+            return $ m nums ^ power
 
         readBinary :: [Integer] -> Integer
         readBinary v = go 0 (reverse v) 0
@@ -191,7 +193,6 @@ eval :: LispVal -> ThrowsError LispVal
 eval val = case val of
     String _ -> return val
     Number _ -> return val
-    Float _  -> return val
     Bool _   -> return val
     Char _   -> return val
     List [Atom "quote", v]  -> return v
@@ -239,7 +240,6 @@ eval val = case val of
                 eqv' a b = case (a,b) of
                     (Bool arg1      , Bool arg2  )     -> arg1 == arg2
                     (Number arg1    , Number arg2)     -> arg1 == arg2
-                    (Float arg1     , Float arg2 )     -> arg1 == arg2
                     (Char arg1      , Char arg2  )     -> arg1 == arg2
                     (String arg1    , String arg2)     -> arg1 == arg2
                     (Atom arg1      , Atom arg2  )     -> arg1 == arg2
@@ -302,7 +302,6 @@ primitives =
 
         numberOp = return . \case
             Number _ -> Bool True
-            Float _  -> Bool True
             _        -> Bool False
 
         symbolOp = return . \case
