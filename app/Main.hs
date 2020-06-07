@@ -1,6 +1,13 @@
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE LambdaCase #-}
+
 module Main (main) where
 
-import Lisp
+import Repl (evalAndPrint, runRepl)
+import System.Environment (getArgs)
 
 main :: IO ()
-main = runLisp
+main = getArgs >>= \case
+    []       -> runRepl
+    [scheme] ->  evalAndPrint scheme
+    _        -> putStrLn "Program takes only 0 or 1 argument"

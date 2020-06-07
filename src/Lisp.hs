@@ -7,13 +7,8 @@ module Lisp where
 import Data.Either (fromRight)
 import Data.Foldable (foldlM, asum)
 import Numeric (readOct, readHex)
-import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
-import Control.Monad ((>=>))
 import Text.Read (readMaybe)
-
-runLisp :: IO ()
-runLisp = getArgs >>= print . (readExpr >=> eval) . head
 
 readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
@@ -205,7 +200,8 @@ eval val = case val of
     List (Atom "equal?" : args)              -> equal args
     List (Atom "cond" : args)                -> cond args
     List (Atom func   : args)                -> apply func =<< traverse eval args
-    List contents                            -> List <$> traverse eval contents
+    List (h:_)                               -> throwError $ TypeMismatch "function" h
+    List []                                  -> throwError $ Default "cannot evaluate empty list"
     DottedList h t                           -> DottedList <$> (traverse eval h) <*> (eval t)
     Atom _       -> return val
     where

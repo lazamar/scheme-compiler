@@ -80,11 +80,13 @@ main = hspec $ do
             it "hexadecimal lower case" $ lispValue "#xa"    $ Number 10
 
         describe "List" $ do
-            it "of values"  $ lispValue "(1 2 3)" $ List [Number 1, Number 2, Number 3]
+            it "of values"  $ lispValue "'(1 2 3)" $ List [Number 1, Number 2, Number 3]
             it "empty"      $ lispValue "'()"     $ List []
             xit "throws on unquoted empty list"   $ lispThrows "()" isParser
-            it "of lists"   $ lispValue "((2 3) (4 5))"
-                $ List [List [Number 2, Number 3] , List [Number 4, Number 5]]
+            it "of lists"   $ lispValue "'('(2 3) '(4 5))" $ List
+                    [ List [Atom "quote", List [Number 2, Number 3]]
+                    , List [Atom "quote", List [Number 4, Number 5]]
+                    ]
 
         describe "Dotted list" $ do
             it "of values" $ lispValue "(1 2 . 3)" $ DottedList [Number 1, Number 2] (Number 3)
