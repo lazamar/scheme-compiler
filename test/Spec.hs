@@ -135,10 +135,12 @@ main = hspec $ do
 
                 describe "weak" $ do
                     it "recognises equal values" $ property $ \x -> lispValue (call "equal?" [x, x]) $ Bool True
-                    it "recognises values that can be coerced" $ do
-                        lispValue "(equal? #t 2)"    $ Bool True
-                        lispValue "(equal? '(2) 2)"  $ Bool True
-                        lispValue "(equal? \"2\" 2)" $ Bool True
+                    it "coerces singleton lists to element" $ lispValue "(equal? '(2) 2)"            $ Bool True
+                    it "coerces strings to numbers"         $ lispValue "(equal? \"2\" 2)"           $ Bool True
+                    it "performs deep coercion"             $ lispValue "(equal? '(1 \"2\") '(1 2))" $ Bool True
+                    it "performs deep of nested lists"      $ lispValue "(equal? '('('(1)) \"2\") '(1 '('(2))))" $ Bool True
+                    it "recognises unequal types"           $ lispValue "(equal? 1 \"2\")"          $ Bool False
+                    it "recognises unequal values"          $ lispValue "(equal? 1 2)"              $ Bool False
 
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10

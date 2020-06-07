@@ -10,6 +10,7 @@ import Numeric (readOct, readHex)
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad ((>=>))
+import Text.Read (readMaybe)
 
 runLisp :: IO ()
 runLisp = getArgs >>= print . (readExpr >=> eval) . head
@@ -258,13 +259,28 @@ eval val = case val of
 
 data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
 
+data Coerced a
+    = CVal a
+    | CList [Coerced a]
+    deriving (Eq, Show)
+
 unpackEqual :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
-unpackEqual v1 v2 (AnyUnpacker f)
+unpackEqual v1 v2 (AnyUnpacker unpack)
     = catchError (const $ return False)
-    $ (==) <$> f v1 <*> f v2
+    $ (==) <$> deepUnpack' unpack v1 <*> deepUnpack' unpack v2
 
-
-
+deepUnpack' unpack val = deepUnpack val
+    where
+        deepUnpack v = case v of
+            Atom _         -> CVal <$> unpack v
+            Number _       -> CVal <$> unpack v
+            String _       -> CVal <$> unpack v
+            Bool _         -> CVal <$> unpack v
+            Char _         -> CVal <$> unpack v
+            DottedList h t -> CList <$> traverse deepUnpack (h ++ [t])
+            List [Atom "quote", val] -> deepUnpack val
+            List [val]     -> deepUnpack val
+            List vals      -> CList <$> traverse deepUnpack vals
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
@@ -332,13 +348,14 @@ asNum :: LispVal -> ThrowsError Integer
 asNum = \case
     List [n] -> asNum n
     Number n -> return n
+    String s | Just n <- readMaybe s -> return  n
     val      -> throwError $ TypeMismatch "Number" val
 
 asBool :: LispVal -> ThrowsError Bool
 asBool = \case
     List [n] -> asBool n
     Bool n   -> return n
-    _        -> return True
+    val      -> throwError $ TypeMismatch "boolean" val
 
 asStr :: LispVal -> ThrowsError String
 asStr = \case
