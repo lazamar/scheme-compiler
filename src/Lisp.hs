@@ -1,5 +1,8 @@
 {-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE TupleSections  #-}
+{-# LANGUAGE BlockArguments  #-}
+{-# LANGUAGE RankNTypes  #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
 
 module Lisp where
 
@@ -29,19 +32,20 @@ data LispVal
     | String String
     | Bool Bool
     | Char Char
-    deriving (Eq)
+    deriving (Eq, Show)
 
-instance Show LispVal where
-    show = \case
-        String contents -> "\"" ++ contents ++ "\""
-        Atom name       -> name
-        Bool True       -> "#t"
-        Bool False      -> "#f"
-        Float val       -> show val
-        Number val      -> show val
-        Char val        -> "'" <> show val <> "'"
-        List contents   -> "(" ++ unwordsList contents ++ ")"
-        DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ show t ++ ")"
+toScheme :: LispVal -> String
+toScheme = \case
+    String contents -> "\"" ++ contents ++ "\""
+    Atom name       -> name
+    Bool True       -> "#t"
+    Bool False      -> "#f"
+    Float val       -> show val
+    Number val      -> show val
+    Char val        -> "'" <> show val <> "'"
+    List contents   -> "(" ++ unwordsList contents ++ ")"
+    DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ show t ++ ")"
+
 
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map show
@@ -104,29 +108,28 @@ parseAtom = do
         _    -> Atom atom
 
 parseNumber :: Parser LispVal
-parseNumber = withBase <|> float <|> floatOrInt
+parseNumber = withBase <|>  try float <|> try integer
     where
         withBase = do
             char '#'
             Number <$> asum
-                [ char 'b' >> readBinary . fmap (read . pure) <$> many1 (oneOf "01")
-                , char 'o' >> fst . head . readOct <$> many1 (oneOf ['0'..'7'])
-                , char 'd' >> read <$> many1 digit
-                , char 'x' >> fst . head . readHex <$> many1
+                [ char 'b' >> sign >>= \m -> m . readBinary . fmap (read . pure) <$> many1 (oneOf "01")
+                , char 'o' >> sign >>= \m -> m . fst . head . readOct <$> many1 (oneOf ['0'..'7'])
+                , char 'd' >> sign >>= \m -> m . read <$> many1 digit
+                , char 'x' >> sign >>= \m -> m . fst . head . readHex <$> many1
                     (oneOf $ ['0'..'9'] <> ['a'..'f'] <> ['A'..'F'])
                 ]
 
-        float = fromDot ""
+        sign :: Num a => Parser (a -> a)
+        sign = (char '-' >> return negate) <|> return id
 
-        floatOrInt = do
-            predot <- many1 digit
-            fromDot predot <|> return (Number $ read predot)
+        integer = fmap Number $ sign <*> fmap read (many1 digit)
 
-        fromDot :: String -> Parser LispVal
-        fromDot predot = do
+        float = fmap Float $ sign <*> do
+            predot <- many digit
             char '.'
             postdot <- many1 digit
-            return  $ Float $ fst . head . readFloat $ '0':predot <> "." <> postdot
+            return  $ fst . head . readFloat $ '0':predot <> "." <> postdot
 
         readBinary :: [Integer] -> Integer
         readBinary v = go 0 (reverse v) 0
@@ -193,10 +196,12 @@ eval val = case val of
     Char _   -> return val
     List [Atom "quote", v]  -> return v
     List [Atom "if", predicate, conseq, alt] -> ifFun predicate conseq alt
-    List (Atom "car" : args)                 -> car args
-    List (Atom "cdr" : args)                 -> cdr args
+    List (Atom "car"  : args)                -> car args
+    List (Atom "cdr"  : args)                -> cdr args
     List (Atom "cons" : args)                -> cons args
-    List (Atom func : args)                  -> apply func =<< traverse eval args
+    List (Atom "eqv?" : args)                -> eqv args
+    List (Atom "eq?"  : args)                -> eqv args
+    List (Atom func   : args)                -> apply func =<< traverse eval args
     List contents                            -> List <$> traverse eval contents
     DottedList h t                           -> DottedList <$> (traverse eval h) <*> (eval t)
     Atom _       -> return val
@@ -228,6 +233,23 @@ eval val = case val of
             DottedList xs t        -> return $ DottedList (new:xs) t
             other                  -> return $ DottedList [new] other
 
+        eqv = binary $ on return Bool eqv'
+            where
+                eqv' :: LispVal -> LispVal -> Bool
+                eqv' a b = case (a,b) of
+                    (Bool arg1      , Bool arg2  )     -> arg1 == arg2
+                    (Number arg1    , Number arg2)     -> arg1 == arg2
+                    (Float arg1     , Float arg2 )     -> arg1 == arg2
+                    (Char arg1      , Char arg2  )     -> arg1 == arg2
+                    (String arg1    , String arg2)     -> arg1 == arg2
+                    (Atom arg1      , Atom arg2  )     -> arg1 == arg2
+                    (DottedList xs x, DottedList ys y) -> eqv' (List $ xs ++ [x]) (List $ ys ++ [y])
+                    (List arg1, List arg2) ->
+                        let eqvPair (x1, x2) = eqv' x1 x2
+                        in (length arg1 == length arg2) && (all eqvPair $ zip arg1 arg2)
+                    (_, _) -> False
+
+
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
     [ ("+"          , twoOrMore $ on num Number (+))
@@ -255,12 +277,6 @@ primitives =
     , ("symbol?"    , unary symbolOp)
     ]
     where
-        on :: (LispVal -> ThrowsError a)
-           -> (b -> LispVal)
-           -> (a -> a -> b)
-           -> (LispVal -> LispVal -> ThrowsError LispVal)
-        on from to fun arg1 arg2 = fmap to $ fun <$> from arg1 <*> from arg2
-
         num :: LispVal -> ThrowsError Integer
         num = \case
             List [n] -> num n
@@ -298,6 +314,12 @@ primitives =
             args@[]  -> throwError $ NumArgs 2 args
             args@[_] -> throwError $ NumArgs 2 args
             arg:rest -> foldlM fun arg rest
+
+on :: (LispVal -> ThrowsError a)
+   -> (b -> LispVal)
+   -> (a -> a -> b)
+   -> (LispVal -> LispVal -> ThrowsError LispVal)
+on from to fun arg1 arg2 = fmap to $ fun <$> from arg1 <*> from arg2
 
 unary :: (LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
 unary fun = \case

@@ -2,9 +2,9 @@
 {-# LANGUAGE TupleSections  #-}
 import Test.Hspec
 import Test.Hspec
-import Test.QuickCheck
+import Test.QuickCheck (oneof, Arbitrary(..), property, Gen)
 import Lisp hiding (runLisp)
-import Text.ParserCombinators.Parsec hiding (spaces)
+import Text.ParserCombinators.Parsec hiding (spaces, oneOf)
 import Data.Bifunctor (first)
 
 runLisp :: String -> ThrowsError LispVal
@@ -66,6 +66,7 @@ main = hspec $ do
             it "hexadecimal lower case" $ lispValue "#xa"    $ Number 10
             it "float"                  $ lispValue "1.5"    $ Float 1.5
             it "float starts with dot"  $ lispValue ".5"     $ Float 0.5
+            it "negative float"         $ lispValue "-2.5"   $ Float (-2.5)
 
         describe "List" $ do
             it "of values"  $ lispValue "(1 2 3)" $ List [Number 1, Number 2, Number 3]
@@ -112,6 +113,11 @@ main = hspec $ do
                     it "cons item to non-list"          $ lispValue "(cons 1 2)"        $ DottedList [Number 1] (Number 2)
                     it "throws if given more arguments" $ lispThrows "(cons 1 2 3)"     isNumArgs
 
+        --    describe "Equality" $ do
+        --        describe "Strict" $ do
+        --            it "recognises equal values" $
+        --                property $ \x -> lispValue (call "eqv?" [x, x]) $ Bool True
+
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
             it "* multiplies multiple numbers"      $ lispValue "(* 1 2 3 4)"       $ Number 24
@@ -148,4 +154,24 @@ main = hspec $ do
             it "thrown when numeric function is applied to non-number"      $ lispThrows "(+ 1 \"Hi\")"    isTypeMismatch
             it "thrown when unknown function is used"                       $ lispThrows "(what? 1 4)"     isNotFunction
             it "not thrown for nested computations"                         $ lispValue "(+ 1 (+ 2 3 4))" $ Number 10
+
+
+-- | Produce scheme code to call a function with given args
+call :: String -> [LispVal] -> String
+call fname args = show $ List $ Atom fname : args
+
+instance Arbitrary LispVal where
+    arbitrary = oneof
+        [ List <$> arbitrary
+        , DottedList <$> nonEmpty <*> arbitrary
+        , Number <$> arbitrary
+        , Float <$> arbitrary
+        , String <$> nonEmpty
+        , Bool <$> arbitrary
+        , Char <$> arbitrary
+        -- Atom <$> arbitrary -- Commented out to avoid the generator calling random functions
+        ]
+        where
+            nonEmpty :: Arbitrary a => Gen [a]
+            nonEmpty = (:) <$> arbitrary <*> arbitrary
 
