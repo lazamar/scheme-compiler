@@ -15,8 +15,25 @@ runLisp str = do
 lispValue :: String -> LispVal -> Expectation
 lispValue str val = runLisp str `shouldBe` Right val
 
-lispThrows :: (LispError -> Bool) -> String -> Expectation
-lispThrows onError str = first onError (runLisp str) `shouldBe` Left True
+lispThrows ::  String -> String -> Expectation
+lispThrows str err = first errorConstructor (runLisp str) `shouldBe` Left err
+    where
+        errorConstructor = \case
+            NumArgs _ _         -> isNumArgs
+            TypeMismatch _ _    -> isTypeMismatch
+            Parser _            -> isParser
+            BadSpecialForm _ _  -> isBadSpecialForm
+            NotFunction _ _     -> isNotFunction
+            UnboundVar _ _      -> isUnboundVar
+            Default _           -> isDefault
+
+isNumArgs        = "NumArgs"
+isTypeMismatch   = "TypeMismatch"
+isParser         = "Parser"
+isBadSpecialForm = "BadSpecialForm"
+isNotFunction    = "NotFunction"
+isUnboundVar     = "UnboundVar"
+isDefault        = "Default"
 
 main :: IO ()
 main = hspec $ do
@@ -51,7 +68,9 @@ main = hspec $ do
             it "float starts with dot"  $ lispValue ".5"     $ Float 0.5
 
         describe "List" $ do
-            it "of values" $ lispValue "(1 2 3)" $ List [Number 1, Number 2, Number 3]
+            it "of values"  $ lispValue "(1 2 3)" $ List [Number 1, Number 2, Number 3]
+            it "empty"      $ lispValue "'()"     $ List []
+            xit "throws on unquoted empty list"   $ lispThrows "()" isParser
             it "of lists"   $ lispValue "((2 3) (4 5))"
                 $ List [List [Number 2, Number 3] , List [Number 4, Number 5]]
 
@@ -67,6 +86,31 @@ main = hspec $ do
                 it "evaluates second argument if true"      $ lispValue "(if #t 1 2)" $ Number 1
                 it "evaluates third argument if false"      $ lispValue "(if #f 1 2)" $ Number 2
                 it "considers non-boolean values as true"   $ lispValue "(if 5 1 2)"  $ Number 1
+
+            describe "List" $ do
+                describe "car" $ do
+                    it "on multiple element list" $ lispValue "(car '(1 2 3))"    $ Number 1
+                    it "on one element list"      $ lispValue "(car '(1))"        $ Number 1
+                    it "on dotted list"           $ lispValue "(car '(1 2 . 3))"  $ Number 1
+                    it "errors if applied to non-list"              $ lispThrows  "(car '1)"    isTypeMismatch
+                    it "errors if applied to wrong number of args"  $ lispThrows  "(car '1 '2)" isNumArgs
+
+                describe "cdr" $ do
+                    it "returns tail on list with multiple items"           $ lispValue "(cdr '(a b c))"   $ List [Atom "b", Atom "c"]
+                    it "returns tail on list with two items"                $ lispValue "(cdr '(a b))"     $ List [Atom "b"]
+                    it "returns empty list on list with one item"           $ lispValue "(cdr '(a))"       $ List []
+                    it "returns last on dotted list with two items"         $ lispValue "(cdr '(a . b))"   $ Atom "b"
+                    it "returns dotted list on dotted list witht two items" $ lispValue "(cdr '(a b . c))" $ DottedList [Atom "b"] (Atom "c")
+                    it "throws if arg is not list"                          $ lispThrows "(cdr 'a)"        isTypeMismatch
+                    it "throws if arg is empty list"                        $ lispThrows "(cdr '())"       isTypeMismatch
+                    it "throws if given more arguments "                    $ lispThrows "(cdr 'a 'b)"     isNumArgs
+
+                describe "cons" $ do
+                    it "cons item to list"              $ lispValue "(cons 1 '(2 3))"   $ List [Number 1, Number 2, Number 3]
+                    it "cons item to empty list"        $ lispValue "(cons 1 '())"      $ List [Number 1]
+                    it "cons item to dotted list"       $ lispValue "(cons 1 '(2 . 3))" $ DottedList [Number 1, Number 2] (Number 3)
+                    it "cons item to non-list"          $ lispValue "(cons 1 2)"        $ DottedList [Number 1] (Number 2)
+                    it "throws if given more arguments" $ lispThrows "(cons 1 2 3)"     isNumArgs
 
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
@@ -99,30 +143,9 @@ main = hspec $ do
             it "string>=? handles true case"        $ lispValue "(string>=? \"hi\" \"hi\")" $ Bool True
 
     describe "Evaluation errors" $ do
-            it "thrown when unary functions is applied to multiple values"  $ lispThrows isNumArgs "(number? 1 2 3)"
-            it "thrown when binary function is applied to multiple values"  $ lispThrows isNumArgs "(number? 1 2 3)"
-            it "thrown when numeric function is applied to non-number"      $ lispThrows isTypeMismatch "(+ 1 \"Hi\")"
+            it "thrown when unary functions is applied to multiple values"  $ lispThrows "(number? 1 2 3)" isNumArgs
+            it "thrown when binary function is applied to multiple values"  $ lispThrows "(number? 1 2 3)" isNumArgs
+            it "thrown when numeric function is applied to non-number"      $ lispThrows "(+ 1 \"Hi\")"    isTypeMismatch
+            it "thrown when unknown function is used"                       $ lispThrows "(what? 1 4)"     isNotFunction
             it "not thrown for nested computations"                         $ lispValue "(+ 1 (+ 2 3 4))" $ Number 10
-            it "thrown when unknown function is used"                       $ lispThrows isNotFunction "(what? 1 4)"
 
-isNumArgs = \case
-    NumArgs _ _     -> True
-    _               -> False
-isTypeMismatch = \case
-    TypeMismatch _ _ -> True
-    _                -> False
-isParser = \case
-   Parser  _        -> True
-   _                -> False
-isBadSpecialForm = \case
-   BadSpecialForm _ _ -> True
-   _                  -> False
-isNotFunction = \case
-   NotFunction _ _  -> True
-   _                -> False
-isUnboundVar = \case
-   UnboundVar _ _   -> True
-   _                -> False
-isDefault = \case
-   Default _        -> True
-   _                -> False

@@ -140,12 +140,16 @@ parseNumber = withBase <|> float <|> floatOrInt
 -- ## Recursive types
 
 parseList :: Parser LispVal
-parseList = do
-    first  <- parseExpr
-    others <- many (try $ spaces >> parseExpr)
-    let h = first:others
-    dottedList h <|> return (List h)
+parseList = fullList <|> emptyList
     where
+        emptyList = return $ List []
+
+        fullList  = do
+            first  <- parseExpr
+            others <- many (try $ spaces >> parseExpr)
+            let h = first:others
+            dottedList h <|> return (List h)
+
         dottedList h = do
             t <- spaces >> char '.' >> spaces >> parseExpr
             return $ DottedList h t
@@ -188,19 +192,41 @@ eval val = case val of
     Bool _   -> return val
     Char _   -> return val
     List [Atom "quote", v]  -> return v
-    List [Atom "if", predicate, conseq, alt] -> eval predicate >>= \case
-        Bool False -> eval alt
-        _          -> eval conseq
-    List (Atom func : args) -> apply func =<< traverse eval args
-    List contents           -> List <$> traverse eval contents
-    DottedList h t          -> DottedList <$> (traverse eval h) <*> (eval t)
-
+    List [Atom "if", predicate, conseq, alt] -> ifFun predicate conseq alt
+    List (Atom "car" : args)                 -> car args
+    List (Atom "cdr" : args)                 -> cdr args
+    List (Atom "cons" : args)                -> cons args
+    List (Atom func : args)                  -> apply func =<< traverse eval args
+    List contents                            -> List <$> traverse eval contents
+    DottedList h t                           -> DottedList <$> (traverse eval h) <*> (eval t)
     Atom _       -> return val
     where
         apply :: String -> [LispVal] -> ThrowsError LispVal
         apply func args = case lookup func primitives of
             Nothing -> throwError $ NotFunction "Unrecognized primitive function args" func
             Just f  -> f args
+
+        ifFun predicate conseq alt = eval predicate >>= \case
+            Bool False -> eval alt
+            _          -> eval conseq
+
+        car = unary $ \case
+            List (Atom "quote":xs) -> car xs
+            List (x:_)             -> return x
+            DottedList (x:_) _     -> return x
+            badArg                 -> throwError $ TypeMismatch "pair" badArg
+
+        cdr = unary $ \case
+            List (Atom "quote":xs) -> cdr xs
+            List (_:xs)            -> return $ List xs
+            DottedList (_:xs) t    -> return $ if null xs then t else DottedList xs t
+            badArg                 -> throwError $ TypeMismatch "pair" badArg
+
+        cons = binary $ \new list -> case list of
+            List (Atom "quote":xs) -> cons (new:xs)
+            List xs                -> return $ List (new:xs)
+            DottedList xs t        -> return $ DottedList (new:xs) t
+            other                  -> return $ DottedList [new] other
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
@@ -267,21 +293,21 @@ primitives =
             Atom _  -> Bool True
             _       -> Bool False
 
-        unary :: (LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
-        unary fun = \case
-            arg:[] -> fun arg
-            args   -> throwError $ NumArgs 1 args
-
-        binary :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
-        binary fun = \case
-            arg1:arg2:[] -> fun arg1 arg2
-            args   -> throwError $ NumArgs 2 args
-
         twoOrMore :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
         twoOrMore fun = \case
             args@[]  -> throwError $ NumArgs 2 args
             args@[_] -> throwError $ NumArgs 2 args
             arg:rest -> foldlM fun arg rest
+
+unary :: (LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+unary fun = \case
+    arg:[] -> fun arg
+    args   -> throwError $ NumArgs 1 args
+
+binary :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+binary fun = \case
+    arg1:arg2:[] -> fun arg1 arg2
+    args   -> throwError $ NumArgs 2 args
 
 catchError :: Either a b -> (a -> Either a b) -> Either a b
 catchError e f = either f return e
