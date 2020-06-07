@@ -201,26 +201,55 @@ eval val = case val of
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
-    [ ("+"          , twoOrMore $ onNumbers (+))
-    , ("-"          , twoOrMore $ onNumbers (-))
-    , ("*"          , twoOrMore $ onNumbers (*))
-    , ("/"          , twoOrMore $ onNumbers div)
-    , ("mod"        , binary $ onNumbers mod   )
-    , ("quotient"   , binary $ onNumbers quot  )
-    , ("remainder"  , binary $ onNumbers rem   )
-    , ("string?"    , unary stringOp           )
-    , ("number?"    , unary numberOp           )
-    , ("symbol?"    , unary symbolOp           )
+    [ ("+"          , twoOrMore $ on num Number (+))
+    , ("-"          , twoOrMore $ on num Number (-))
+    , ("*"          , twoOrMore $ on num Number (*))
+    , ("/"          , twoOrMore $ on num Number div)
+    , ("="          , binary $ on num Bool (==))
+    , ("<"          , binary $ on num Bool (<))
+    , (">"          , binary $ on num Bool (>))
+    , ("/="         , binary $ on num Bool (/=))
+    , (">="         , binary $ on num Bool (>=))
+    , ("<="         , binary $ on num Bool (<=))
+    , ("&&"         , binary $ on bool Bool (&&))
+    , ("||"         , binary $ on bool Bool (||))
+    , ("string=?"   , binary $ on str Bool (==))
+    , ("string<?"   , binary $ on str Bool (<))
+    , ("string>?"   , binary $ on str Bool (>))
+    , ("string<=?"  , binary $ on str Bool (<=))
+    , ("string>=?"  , binary $ on str Bool (>=))
+    , ("mod"        , binary $ on num Number mod)
+    , ("quotient"   , binary $ on num Number quot)
+    , ("remainder"  , binary $ on num Number rem )
+    , ("string?"    , unary stringOp)
+    , ("number?"    , unary numberOp)
+    , ("symbol?"    , unary symbolOp)
     ]
     where
-        onNumbers :: (Integer -> Integer -> Integer) -> (LispVal -> LispVal -> ThrowsError LispVal)
-        onNumbers fun arg1 arg2 = fmap Number $ fun <$> unpackNum arg1 <*> unpackNum arg2
+        on :: (LispVal -> ThrowsError a)
+           -> (b -> LispVal)
+           -> (a -> a -> b)
+           -> (LispVal -> LispVal -> ThrowsError LispVal)
+        on from to fun arg1 arg2 = fmap to $ fun <$> from arg1 <*> from arg2
 
-        unpackNum :: LispVal -> ThrowsError Integer
-        unpackNum = \case
-            List [n] -> unpackNum n
+        num :: LispVal -> ThrowsError Integer
+        num = \case
+            List [n] -> num n
             Number n -> return n
             val      -> throwError $ TypeMismatch "Number" val
+
+        bool :: LispVal -> ThrowsError Bool
+        bool = \case
+            List [n] -> bool n
+            Bool n   -> return n
+            val      -> throwError $ TypeMismatch "Bool" val
+
+        str :: LispVal -> ThrowsError String
+        str = \case
+            String v -> return v
+            Number v -> return $ show v
+            Bool v   -> return $ show v
+            val      -> throwError $ TypeMismatch "String" val
 
         stringOp = return . \case
             String _ -> Bool True

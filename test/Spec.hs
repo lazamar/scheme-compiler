@@ -76,6 +76,20 @@ main = hspec $ do
             it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False
             it "symbol? is True for identifiers"    $ lispValue "(symbol? hello)"   $ Bool True
             it "symbol? is False for primitives"    $ lispValue "(symbol? 123)"     $ Bool False
+            it "= is True for equal nums"           $ lispValue "(= 2 2)"           $ Bool True
+            it "= is False for different nums"      $ lispValue "(= 2 3)"           $ Bool False
+            it "< handles true case"                $ lispValue "(< 1 2)"           $ Bool True
+            it "> handles true case"                $ lispValue "(> 2 1)"           $ Bool True
+            it "/= handles true case"               $ lispValue "(/= 1 2)"          $ Bool True
+            it ">= handles true case"               $ lispValue "(>= 2 2)"          $ Bool True
+            it "<= handles true case"               $ lispValue "(<= 2 2)"          $ Bool True
+            it "&& handles true case"               $ lispValue "(&& #t #t)"        $ Bool True
+            it "|| handles true case"               $ lispValue "(|| #t #f)"        $ Bool True
+            it "string=? handles true case"         $ lispValue "(string=? \"hi\" \"hi\")"  $ Bool True
+            it "string<? handles true case"         $ lispValue "(string<? \"a\" \"b\")"    $ Bool True
+            it "string>? handles true case"         $ lispValue "(string>? \"b\" \"a\")"    $ Bool True
+            it "string<=? handles true case"        $ lispValue "(string<=? \"hi\" \"hi\")" $ Bool True
+            it "string>=? handles true case"        $ lispValue "(string>=? \"hi\" \"hi\")" $ Bool True
 
     describe "Evaluation errors" $ do
             it "thrown when unary functions is applied to multiple values"  $ lispThrows isNumArgs "(number? 1 2 3)"
