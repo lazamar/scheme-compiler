@@ -188,6 +188,9 @@ eval val = case val of
     Bool _   -> return val
     Char _   -> return val
     List [Atom "quote", v]  -> return v
+    List [Atom "if", predicate, conseq, alt] -> eval predicate >>= \case
+        Bool False -> eval alt
+        _          -> eval conseq
     List (Atom func : args) -> apply func =<< traverse eval args
     List contents           -> List <$> traverse eval contents
     DottedList h t          -> DottedList <$> (traverse eval h) <*> (eval t)

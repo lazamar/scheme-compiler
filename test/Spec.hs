@@ -61,7 +61,14 @@ main = hspec $ do
         describe "Atom" $ do
             it "identifier"  $ lispValue "hello" $ Atom "hello"
 
-    describe "Basic operations" $ do
+    describe "Evaluates" $ do
+        describe "Standard functions" $ do
+            describe "if statement" $ do
+                it "evaluates second argument if true"      $ lispValue "(if #t 1 2)" $ Number 1
+                it "evaluates third argument if false"      $ lispValue "(if #f 1 2)" $ Number 2
+                it "considers non-boolean values as true"   $ lispValue "(if 5 1 2)"  $ Number 1
+
+        describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
             it "* multiplies multiple numbers"      $ lispValue "(* 1 2 3 4)"       $ Number 24
             it "- subtracts multiple numbers"       $ lispValue "(- 1 2 3 4)"       $ Number (-8)
