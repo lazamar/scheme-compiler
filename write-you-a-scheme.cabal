@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 49e311413aac7df3d32efae95ef6f749b47a3c81feca6fb9a8abe2006b1a80a9
+-- hash: f6e30675499eb6fe596c228541b7fc180172b5e42f9013b40c2bab1d6adc5122
 
 name:           write-you-a-scheme
 version:        0.1.0.0
@@ -39,6 +39,7 @@ library
     , base >=4.7 && <5
     , hspec
     , hspec-core
+    , mtl
     , parsec
   default-language: Haskell2010
 
@@ -54,6 +55,7 @@ executable write-you-a-scheme-exe
     , base >=4.7 && <5
     , hspec
     , hspec-core
+    , mtl
     , parsec
     , write-you-a-scheme
   default-language: Haskell2010
@@ -71,6 +73,7 @@ test-suite write-you-a-scheme-test
     , base >=4.7 && <5
     , hspec
     , hspec-core
+    , mtl
     , parsec
     , write-you-a-scheme
   default-language: Haskell2010

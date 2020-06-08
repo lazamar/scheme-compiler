@@ -1,5 +1,7 @@
 {-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE TupleSections  #-}
+
+import Control.Monad.Except
 import Test.Hspec
 import Test.Hspec
 import Test.QuickCheck (oneof, Arbitrary(..), property, Gen, listOf, listOf1, elements, sized)
@@ -7,11 +9,14 @@ import Lisp hiding (runLisp)
 import Text.ParserCombinators.Parsec hiding (spaces, oneOf)
 import Data.Bifunctor (first)
 import Debug.Trace
+import System.IO.Unsafe (unsafePerformIO)
 
 runLisp' :: String -> ThrowsError LispVal
 runLisp' str = do
     parsed <- first Parser $ parse parseExpr "lisp" str
-    eval parsed
+    unsafePerformIO $ runExceptT $ do
+        env <- liftIO nullEnv
+        eval env parsed
 
 lispValue :: String -> LispVal -> Expectation
 lispValue str val = runLisp' str `shouldBe` Right val

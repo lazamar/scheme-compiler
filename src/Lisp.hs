@@ -1,11 +1,16 @@
 {-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE TupleSections  #-}
 {-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE ConstraintKinds  #-}
 
 module Lisp where
 
+import Control.Monad.Except
 import Data.Either (fromRight)
 import Data.Foldable (foldlM, asum)
+import Data.IORef
+import Data.Maybe (isJust)
 import Numeric (readOct, readHex)
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Text.Read (readMaybe)
@@ -182,10 +187,61 @@ instance Show LispError where
         Parser parseErr             -> ["Parse error at ", show parseErr]
         Default _                   -> ["Default?"]
 
+type Env = IORef [(String, IORef LispVal)]
+
 type ThrowsError = Either LispError
 
-eval :: LispVal -> ThrowsError LispVal
-eval val = case val of
+type MonadLispError m = MonadError LispError m
+
+type IOThrowsError = ExceptT LispError IO
+
+nullEnv :: IO Env
+nullEnv = newIORef []
+
+liftThrows :: ThrowsError a -> IOThrowsError a
+liftThrows = either throwError return
+
+isBound :: Env -> String -> IO Bool
+isBound envRef var = isJust . lookup var <$> readIORef envRef
+
+getVar :: Env -> String -> IOThrowsError LispVal
+getVar envRef var = do
+    env <- liftIO $ readIORef envRef
+    case lookup var env of
+        Nothing  -> throwError $ UnboundVar "Getting an unbound variable" var
+        Just ref -> liftIO $ readIORef ref
+
+setVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+setVar envRef var value = do
+    env <- liftIO $ readIORef envRef
+    case lookup var env of
+        Nothing  -> throwError $ UnboundVar "Setting an unbound variable" var
+        Just ref -> liftIO $ writeIORef ref value
+    return value
+
+defineVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+defineVar envRef var value = do
+     alreadyDefined <- liftIO $ isBound envRef var
+     if alreadyDefined
+        then setVar envRef var value
+        else liftIO $ do
+             valueRef <- newIORef value
+             env      <- readIORef envRef
+             writeIORef envRef ((var, valueRef) : env)
+             return value
+
+bindVars :: Env -> [(String, LispVal)] -> IO Env
+bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
+    where
+        extendEnv bindings env = (++ env) <$> (traverse addBinding bindings)
+
+        addBinding (var, value) = do
+            ref <- newIORef value
+            return (var, ref)
+
+
+eval :: Env -> LispVal -> IOThrowsError LispVal
+eval envRef val = case val of
     String _ -> return val
     Number _ -> return val
     Bool _   -> return val
@@ -199,20 +255,22 @@ eval val = case val of
     List (Atom "eq?"  : args)                -> eqv args
     List (Atom "equal?" : args)              -> equal args
     List (Atom "cond" : args)                -> cond args
-    List (Atom func   : args)                -> apply func =<< traverse eval args
+    List (Atom func   : args)                -> apply func =<< traverse eval' args
     List (h:_)                               -> throwError $ TypeMismatch "function" h
     List []                                  -> throwError $ Default "cannot evaluate empty list"
-    DottedList h t                           -> DottedList <$> (traverse eval h) <*> (eval t)
+    DottedList h t                           -> DottedList <$> (traverse eval' h) <*> (eval' t)
     Atom _       -> return val
     where
-        apply :: String -> [LispVal] -> ThrowsError LispVal
+        eval' = eval envRef
+
+        apply :: MonadLispError m => String -> [LispVal] -> m LispVal
         apply func args = case lookup func primitives of
             Nothing -> throwError $ NotFunction "Unrecognized primitive function args" func
             Just f  -> f args
 
-        ifFun predicate conseq alt = eval predicate >>= \case
-            Bool False -> eval alt
-            Bool True -> eval conseq
+        ifFun predicate conseq alt = eval' predicate >>= \case
+            Bool False -> eval' alt
+            Bool True -> eval' conseq
             arg       -> throwError $ TypeMismatch "boolean" arg
 
         car = unary $ \case
@@ -255,28 +313,28 @@ eval val = case val of
 
         cond = \case
             []                   -> throwError $ Default "No clauses matched in conditional"
-            [List [Atom "else", alt]] -> eval alt
+            [List [Atom "else", alt]] -> eval' alt
             clause:rest          -> case clause of
                 List vals -> flip binary vals $ \predicate conseq -> do
-                    p <- eval predicate
+                    p <- eval' predicate
                     if eqv' p (Bool True)
-                       then eval conseq
+                       then eval' conseq
                        else cond rest
 
                 _ -> throwError $ TypeMismatch "List" clause
 
 
 
-data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
+data Unpacker m = forall a. (Eq a) => AnyUnpacker (LispVal -> m a)
 
 data Coerced a
     = CVal a
     | CList [Coerced a]
     deriving (Eq, Show)
 
-unpackEqual :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
+unpackEqual :: MonadLispError m => LispVal -> LispVal -> Unpacker m -> m Bool
 unpackEqual v1 v2 (AnyUnpacker unpack)
-    = catchError (const $ return False)
+    = flip catchError (const $ return False)
     $ (==) <$> deepUnpack v1 <*> deepUnpack v2
     where
         deepUnpack v = case v of
@@ -290,7 +348,7 @@ unpackEqual v1 v2 (AnyUnpacker unpack)
             List [val]     -> deepUnpack val
             List vals      -> CList <$> traverse deepUnpack vals
 
-primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
+primitives :: MonadLispError m => [(String, [LispVal] -> m LispVal)]
 primitives =
     [ ("+"          , twoOrMore $ on asNum Number (+))
     , ("-"          , twoOrMore $ on asNum Number (-))
@@ -330,56 +388,51 @@ primitives =
             Atom _  -> Bool True
             _       -> Bool False
 
-        twoOrMore :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+        twoOrMore :: MonadLispError m => (LispVal -> LispVal -> m LispVal) -> ([LispVal] -> m LispVal)
         twoOrMore fun = \case
             args@[]  -> throwError $ NumArgs 2 args
             args@[_] -> throwError $ NumArgs 2 args
             arg:rest -> foldlM fun arg rest
 
-on :: (LispVal -> ThrowsError a)
+on :: MonadLispError m
+   => (LispVal -> m a)
    -> (b -> LispVal)
    -> (a -> a -> b)
-   -> (LispVal -> LispVal -> ThrowsError LispVal)
+   -> (LispVal -> LispVal -> m LispVal)
 on from to fun arg1 arg2 = fmap to $ fun <$> from arg1 <*> from arg2
 
-unary :: (LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+unary :: MonadLispError m => (LispVal -> m LispVal) -> ([LispVal] -> m LispVal)
 unary fun = \case
     arg:[] -> fun arg
     args   -> throwError $ NumArgs 1 args
 
-binary :: (LispVal -> LispVal -> ThrowsError LispVal) -> ([LispVal] -> ThrowsError LispVal)
+binary :: MonadLispError m => (LispVal -> LispVal -> m LispVal) -> ([LispVal] -> m LispVal)
 binary fun = \case
     arg1:arg2:[] -> fun arg1 arg2
     args   -> throwError $ NumArgs 2 args
 
-asNum :: LispVal -> ThrowsError Integer
+asNum :: MonadLispError m => LispVal -> m Integer
 asNum = \case
     List [n] -> asNum n
     Number n -> return n
     String s | Just n <- readMaybe s -> return  n
     val      -> throwError $ TypeMismatch "Number" val
 
-asBool :: LispVal -> ThrowsError Bool
+asBool :: MonadLispError m => LispVal -> m Bool
 asBool = \case
     List [n] -> asBool n
     Bool n   -> return n
     val      -> throwError $ TypeMismatch "boolean" val
 
-asStr :: LispVal -> ThrowsError String
+asStr :: MonadLispError m => LispVal -> m String
 asStr = \case
     String v -> return v
     Number v -> return $ show v
     Bool v   -> return $ show v
     val      -> throwError $ TypeMismatch "String" val
 
-catchError :: (a -> Either a b) -> Either a b -> Either a b
-catchError f e = either f return e
+trapError :: (Show e, MonadError e m) => m String -> m String
+trapError = flip catchError (return . show)
 
-throwError :: e -> Either e a
-throwError = Left
-
-trapError :: Show a => Either a String -> Either a String
-trapError = catchError (return . show)
-
-extractValue :: ThrowsError a -> a
-extractValue = fromRight undefined
+extractValue :: IOThrowsError String -> IO String
+extractValue = fmap (fromRight undefined) . runExceptT . trapError

@@ -9,5 +9,5 @@ import System.Environment (getArgs)
 main :: IO ()
 main = getArgs >>= \case
     []       -> runRepl
-    [scheme] ->  evalAndPrint scheme
+    [scheme] -> evalAndPrint scheme
     _        -> putStrLn "Program takes only 0 or 1 argument"
