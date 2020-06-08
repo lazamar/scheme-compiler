@@ -160,6 +160,12 @@ main = hspec $ do
                 it "recognises unequal types"           $ lispValue "(equal? 1 \"2\")"          $ Bool False
                 it "recognises unequal values"          $ lispValue "(equal? 1 2)"              $ Bool False
 
+        describe "define" $ do
+            it "returns the defined value" $ lispValue "(define a 2)" $ Number 2
+            it "allows us to use the value" $ lispValue "(+ (define a 2) a)" $ Number 4
+            it "doesn't do crazy recursion" $ lispThrows "(define a a)" isUnboundVar
+            it "expects only two arguments" $ lispThrows "(define a 2 3)" isUnboundVar
+
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
             it "* multiplies multiple numbers"      $ lispValue "(* 1 2 3 4)"       $ Number 24

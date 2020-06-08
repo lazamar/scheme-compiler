@@ -246,6 +246,7 @@ eval env val = case val of
     Number _ -> return val
     Bool _   -> return val
     Char _   -> return val
+    Atom var -> getVar env var
     List [Atom "quote", v]  -> return v
     List [Atom "if", predicate, conseq, alt] -> ifFun predicate conseq alt
     List (Atom "car"  : args)                -> car args
@@ -261,8 +262,7 @@ eval env val = case val of
     List (h:_)                               -> throwError $ TypeMismatch "function" h
     List []                                  -> throwError $ Default "cannot evaluate empty list"
     DottedList h t                           -> DottedList <$> (traverse eval' h) <*> (eval' t)
-    Atom var                                 -> dereference var
-
+    _                                        -> throwError $ BadSpecialForm "Unrecognised special form" val
     where
         eval' = eval env
 
@@ -325,13 +325,6 @@ eval env val = case val of
                        else cond rest
 
                 _ -> throwError $ TypeMismatch "List" clause
-
-        dereference var = do
-            e <- liftIO $ readIORef env
-            case lookup var e of
-                Nothing  -> throwError $ UnboundVar "Undefined variable" var
-                Just val' -> liftIO $ readIORef val'
-
 
 data Unpacker m = forall a. (Eq a) => AnyUnpacker (LispVal -> m a)
 
