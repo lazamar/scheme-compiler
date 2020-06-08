@@ -3,11 +3,11 @@
 
 module Main (main) where
 
-import Repl (evalAndPrint, runRepl)
+import Repl (runRepl, runOne)
 import System.Environment (getArgs)
 
 main :: IO ()
 main = getArgs >>= \case
     []       -> runRepl
-    [scheme] -> evalAndPrint scheme
+    [scheme] -> runOne scheme
     _        -> putStrLn "Program takes only 0 or 1 argument"

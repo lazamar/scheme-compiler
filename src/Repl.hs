@@ -10,14 +10,13 @@ flushStr str = putStr str >> hFlush stdout
 readPrompt :: String -> IO String
 readPrompt prompt = flushStr prompt >> getLine
 
-evalString :: String -> IO String
-evalString expr = extractValue $ do
+evalString :: Env -> String -> IO String
+evalString env expr = extractValue $ do
     parsed <- ExceptT (return $ readExpr expr)
-    env <- liftIO nullEnv
     toScheme <$> eval env parsed
 
-evalAndPrint :: String -> IO ()
-evalAndPrint expr =  evalString expr >>= putStrLn
+evalAndPrint :: Env -> String -> IO ()
+evalAndPrint env expr = evalString env expr >>= putStrLn
 
 until_ :: Monad m => (a -> Bool) -> m a -> (a -> m ()) -> m ()
 until_ predicate prompt action = do
@@ -27,7 +26,12 @@ until_ predicate prompt action = do
       else action result >> until_ predicate prompt action
 
 runRepl :: IO ()
-runRepl = until_ (== "quit") (readPrompt "Lisp>>> ") evalAndPrint
+runRepl = do
+    env <- nullEnv
+    until_ (== "quit") (readPrompt "Lisp>>> ") (evalAndPrint env)
+
+runOne :: String -> IO ()
+runOne str = nullEnv >>= flip evalAndPrint str
 
 runIOThrows :: IOThrowsError String -> IO String
 runIOThrows action = extractValue $ trapError action
