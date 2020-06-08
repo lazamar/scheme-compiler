@@ -103,58 +103,57 @@ main = hspec $ do
             it "is the inverse of readExpr" $ property $ \x -> readExpr (toScheme x) `shouldBe` Right x
 
     describe "Evaluates" $ do
-        describe "Standard functions" $ do
-            describe "if statement" $ do
-                it "evaluates second argument if true"            $ lispValue "(if #t 1 2)" $ Number 1
-                it "evaluates third argument if false"            $ lispValue "(if #f 1 2)" $ Number 2
-                it "errors with non-boolean values as predicate"  $ lispThrows "(if 5 1 2)" isTypeMismatch
+        describe "if statement" $ do
+            it "evaluates second argument if true"            $ lispValue "(if #t 1 2)" $ Number 1
+            it "evaluates third argument if false"            $ lispValue "(if #f 1 2)" $ Number 2
+            it "errors with non-boolean values as predicate"  $ lispThrows "(if 5 1 2)" isTypeMismatch
 
-            describe "cond statement" $ do
-                it "matches first clause"                  $ lispValue "(cond (#t 2))"          $ Number 2
-                it "matches second clause"                 $ lispValue "(cond (#f 1) (#t 2))"   $ Number 2
-                it "evaluates predicates"                  $ lispValue "(cond ((eqv? 1 (- 5 4)) 1) (#t 2))" $ Number 2
-                it "falls to else if no predicate is true" $ lispValue "(cond (#f 1) (else 2))" $ Number 2
-                it "throws it there is no match or else "  $ lispThrows "(cond (#f 1))"         $ isDefault
+        describe "cond statement" $ do
+            it "matches first clause"                  $ lispValue "(cond (#t 2))"          $ Number 2
+            it "matches second clause"                 $ lispValue "(cond (#f 1) (#t 2))"   $ Number 2
+            it "evaluates predicates"                  $ lispValue "(cond ((eqv? 1 (- 5 4)) 1) (#t 2))" $ Number 2
+            it "falls to else if no predicate is true" $ lispValue "(cond (#f 1) (else 2))" $ Number 2
+            it "throws it there is no match or else "  $ lispThrows "(cond (#f 1))"         $ isDefault
 
-            describe "List" $ do
-                describe "car" $ do
-                    it "on multiple element list" $ lispValue "(car '(1 2 3))"    $ Number 1
-                    it "on one element list"      $ lispValue "(car '(1))"        $ Number 1
-                    it "on dotted list"           $ lispValue "(car '(1 2 . 3))"  $ Number 1
-                    it "errors if applied to non-list"              $ lispThrows  "(car '1)"    isTypeMismatch
-                    it "errors if applied to wrong number of args"  $ lispThrows  "(car '1 '2)" isNumArgs
+        describe "List" $ do
+            describe "car" $ do
+                it "on multiple element list" $ lispValue "(car '(1 2 3))"    $ Number 1
+                it "on one element list"      $ lispValue "(car '(1))"        $ Number 1
+                it "on dotted list"           $ lispValue "(car '(1 2 . 3))"  $ Number 1
+                it "errors if applied to non-list"              $ lispThrows  "(car '1)"    isTypeMismatch
+                it "errors if applied to wrong number of args"  $ lispThrows  "(car '1 '2)" isNumArgs
 
-                describe "cdr" $ do
-                    it "returns tail on list with multiple items"           $ lispValue "(cdr '(a b c))"   $ List [Atom "b", Atom "c"]
-                    it "returns tail on list with two items"                $ lispValue "(cdr '(a b))"     $ List [Atom "b"]
-                    it "returns empty list on list with one item"           $ lispValue "(cdr '(a))"       $ List []
-                    it "returns last on dotted list with two items"         $ lispValue "(cdr '(a . b))"   $ Atom "b"
-                    it "returns dotted list on dotted list witht two items" $ lispValue "(cdr '(a b . c))" $ DottedList [Atom "b"] (Atom "c")
-                    it "throws if arg is not list"                          $ lispThrows "(cdr 'a)"        isTypeMismatch
-                    it "throws if arg is empty list"                        $ lispThrows "(cdr '())"       isTypeMismatch
-                    it "throws if given more arguments "                    $ lispThrows "(cdr 'a 'b)"     isNumArgs
+            describe "cdr" $ do
+                it "returns tail on list with multiple items"           $ lispValue "(cdr '(a b c))"   $ List [Atom "b", Atom "c"]
+                it "returns tail on list with two items"                $ lispValue "(cdr '(a b))"     $ List [Atom "b"]
+                it "returns empty list on list with one item"           $ lispValue "(cdr '(a))"       $ List []
+                it "returns last on dotted list with two items"         $ lispValue "(cdr '(a . b))"   $ Atom "b"
+                it "returns dotted list on dotted list witht two items" $ lispValue "(cdr '(a b . c))" $ DottedList [Atom "b"] (Atom "c")
+                it "throws if arg is not list"                          $ lispThrows "(cdr 'a)"        isTypeMismatch
+                it "throws if arg is empty list"                        $ lispThrows "(cdr '())"       isTypeMismatch
+                it "throws if given more arguments "                    $ lispThrows "(cdr 'a 'b)"     isNumArgs
 
-                describe "cons" $ do
-                    it "cons item to list"              $ lispValue "(cons 1 '(2 3))"   $ List [Number 1, Number 2, Number 3]
-                    it "cons item to empty list"        $ lispValue "(cons 1 '())"      $ List [Number 1]
-                    it "cons item to dotted list"       $ lispValue "(cons 1 '(2 . 3))" $ DottedList [Number 1, Number 2] (Number 3)
-                    it "cons item to non-list"          $ lispValue "(cons 1 2)"        $ DottedList [Number 1] (Number 2)
-                    it "throws if given more arguments" $ lispThrows "(cons 1 2 3)"     isNumArgs
+            describe "cons" $ do
+                it "cons item to list"              $ lispValue "(cons 1 '(2 3))"   $ List [Number 1, Number 2, Number 3]
+                it "cons item to empty list"        $ lispValue "(cons 1 '())"      $ List [Number 1]
+                it "cons item to dotted list"       $ lispValue "(cons 1 '(2 . 3))" $ DottedList [Number 1, Number 2] (Number 3)
+                it "cons item to non-list"          $ lispValue "(cons 1 2)"        $ DottedList [Number 1] (Number 2)
+                it "throws if given more arguments" $ lispThrows "(cons 1 2 3)"     isNumArgs
 
-            describe "Equality" $ do
-                describe "strong" $ do
-                    it "recognises equal values" $ property $ \x -> lispValue (call "eqv?" [x, x]) $ Bool True
-                    it "doesn't say values with different constructors are equal"
-                        $ property $ \x y -> lispValue (call "eqv?" [x, y]) $ Bool $ x == y
+        describe "Equality" $ do
+            describe "strong" $ do
+                it "recognises equal values" $ property $ \x -> lispValue (call "eqv?" [x, x]) $ Bool True
+                it "doesn't say values with different constructors are equal"
+                    $ property $ \x y -> lispValue (call "eqv?" [x, y]) $ Bool $ x == y
 
-                describe "weak" $ do
-                    it "recognises equal values" $ property $ \x -> lispValue (call "equal?" [x, x]) $ Bool True
-                    it "coerces singleton lists to element" $ lispValue "(equal? '(2) 2)"            $ Bool True
-                    it "coerces strings to numbers"         $ lispValue "(equal? \"2\" 2)"           $ Bool True
-                    it "performs deep coercion"             $ lispValue "(equal? '(1 \"2\") '(1 2))" $ Bool True
-                    it "performs deep of nested lists"      $ lispValue "(equal? '('('(1)) \"2\") '(1 '('(2))))" $ Bool True
-                    it "recognises unequal types"           $ lispValue "(equal? 1 \"2\")"          $ Bool False
-                    it "recognises unequal values"          $ lispValue "(equal? 1 2)"              $ Bool False
+            describe "weak" $ do
+                it "recognises equal values" $ property $ \x -> lispValue (call "equal?" [x, x]) $ Bool True
+                it "coerces singleton lists to element" $ lispValue "(equal? '(2) 2)"            $ Bool True
+                it "coerces strings to numbers"         $ lispValue "(equal? \"2\" 2)"           $ Bool True
+                it "performs deep coercion"             $ lispValue "(equal? '(1 \"2\") '(1 2))" $ Bool True
+                it "performs deep of nested lists"      $ lispValue "(equal? '('('(1)) \"2\") '(1 '('(2))))" $ Bool True
+                it "recognises unequal types"           $ lispValue "(equal? 1 \"2\")"          $ Bool False
+                it "recognises unequal values"          $ lispValue "(equal? 1 2)"              $ Bool False
 
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
