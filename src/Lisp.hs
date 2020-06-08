@@ -241,7 +241,7 @@ bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
 
 
 eval :: Env -> LispVal -> IOThrowsError LispVal
-eval envRef val = case val of
+eval env val = case val of
     String _ -> return val
     Number _ -> return val
     Bool _   -> return val
@@ -255,13 +255,16 @@ eval envRef val = case val of
     List (Atom "eq?"  : args)                -> eqv args
     List (Atom "equal?" : args)              -> equal args
     List (Atom "cond" : args)                -> cond args
+    List [Atom "set!", Atom var, form]       -> eval' form >>= setVar env var
+    List [Atom "define", Atom var, form]     -> eval' form >>= defineVar env var
     List (Atom func   : args)                -> apply func =<< traverse eval' args
     List (h:_)                               -> throwError $ TypeMismatch "function" h
     List []                                  -> throwError $ Default "cannot evaluate empty list"
     DottedList h t                           -> DottedList <$> (traverse eval' h) <*> (eval' t)
-    Atom _       -> return val
+    Atom var                                 -> dereference var
+
     where
-        eval' = eval envRef
+        eval' = eval env
 
         apply :: MonadLispError m => String -> [LispVal] -> m LispVal
         apply func args = case lookup func primitives of
@@ -323,6 +326,11 @@ eval envRef val = case val of
 
                 _ -> throwError $ TypeMismatch "List" clause
 
+        dereference var = do
+            e <- liftIO $ readIORef env
+            case lookup var e of
+                Nothing  -> throwError $ UnboundVar "Undefined variable" var
+                Just val' -> liftIO $ readIORef val'
 
 
 data Unpacker m = forall a. (Eq a) => AnyUnpacker (LispVal -> m a)

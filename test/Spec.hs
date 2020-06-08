@@ -21,6 +21,9 @@ runLisp' str = do
 lispValue :: String -> LispVal -> Expectation
 lispValue str val = runLisp' str `shouldBe` Right val
 
+lispParse :: String -> LispVal -> Expectation
+lispParse str val = (first Parser $ parse parseExpr "lisp" str) `shouldBe` Right val
+
 lispThrows ::  String -> String -> Expectation
 lispThrows str err = first errorConstructor (runLisp' str) `shouldBe` Left err
     where
@@ -56,48 +59,50 @@ main :: IO ()
 main = hspec $ do
     describe "Parses" $ do
         describe "Bool" $ do
-            it "true"  $ lispValue "#t" $ Bool True
-            it "false" $ lispValue "#f" $ Bool False
+            it "true"  $ lispParse "#t" $ Bool True
+            it "false" $ lispParse "#f" $ Bool False
 
         describe "Char" $ do
-            it "#\\space"    $ lispValue "#\\space"   $ Char ' '
-            it "#\\newline"  $ lispValue "#\\newline" $ Char '\n'
-            it "#\\A"        $ lispValue "#\\A"       $ Char 'A'
-            it "#\\2"        $ lispValue "#\\2"       $ Char '2'
-            it "#\\\\"       $ lispValue "#\\\\"      $ Char '\\'
-            it "#\\s"        $ lispValue "#\\s"       $ Char 's'
-            it "#\\n"        $ lispValue "#\\n"       $ Char 'n'
+            it "#\\space"    $ lispParse "#\\space"   $ Char ' '
+            it "#\\newline"  $ lispParse "#\\newline" $ Char '\n'
+            it "#\\A"        $ lispParse "#\\A"       $ Char 'A'
+            it "#\\2"        $ lispParse "#\\2"       $ Char '2'
+            it "#\\\\"       $ lispParse "#\\\\"      $ Char '\\'
+            it "#\\s"        $ lispParse "#\\s"       $ Char 's'
+            it "#\\n"        $ lispParse "#\\n"       $ Char 'n'
 
         describe "String" $ do
             let quoted str = "\"" <> str <> "\""
-            it "no ecaped values"   $ lispValue (quoted "Hello") $ String "Hello"
-            it "escaped tab"        $ lispValue (quoted "\\t")   $ String "\t"
-            it "escaped newline"    $ lispValue (quoted "\\n")   $ String "\n"
-            it "escaped quote"      $ lispValue (quoted "\\\"")  $ String "\""
-            it "escaped backslash"  $ lispValue (quoted "\\\\")  $ String "\\"
+            it "no ecaped values"   $ lispParse (quoted "Hello") $ String "Hello"
+            it "escaped tab"        $ lispParse (quoted "\\t")   $ String "\t"
+            it "escaped newline"    $ lispParse (quoted "\\n")   $ String "\n"
+            it "escaped quote"      $ lispParse (quoted "\\\"")  $ String "\""
+            it "escaped backslash"  $ lispParse (quoted "\\\\")  $ String "\\"
 
         describe "Number" $ do
-            it "just digits"            $ lispValue "10"     $ Number 10
-            it "decimal"                $ lispValue "#d10"   $ Number 10
-            it "binary"                 $ lispValue "#b1010" $ Number 10
-            it "octal"                  $ lispValue "#o12"   $ Number 10
-            it "hexadecimal capital"    $ lispValue "#xA"    $ Number 10
-            it "hexadecimal lower case" $ lispValue "#xa"    $ Number 10
+            it "just digits"            $ lispParse "10"     $ Number 10
+            it "decimal"                $ lispParse "#d10"   $ Number 10
+            it "binary"                 $ lispParse "#b1010" $ Number 10
+            it "octal"                  $ lispParse "#o12"   $ Number 10
+            it "hexadecimal capital"    $ lispParse "#xA"    $ Number 10
+            it "hexadecimal lower case" $ lispParse "#xa"    $ Number 10
 
         describe "List" $ do
-            it "of values"  $ lispValue "'(1 2 3)" $ List [Number 1, Number 2, Number 3]
-            it "empty"      $ lispValue "'()"     $ List []
+            it "of values"  $ lispParse "'(1 2 3)" $ List [Atom "quote", List [Number 1, Number 2, Number 3]]
+            it "empty"      $ lispParse "'()"      $ List [Atom "quote", List []]
             xit "throws on unquoted empty list"   $ lispThrows "()" isParser
-            it "of lists"   $ lispValue "'('(2 3) '(4 5))" $ List
-                    [ List [Atom "quote", List [Number 2, Number 3]]
-                    , List [Atom "quote", List [Number 4, Number 5]]
-                    ]
+            it "of lists"   $ lispParse "'('(2 3) '(4 5))"
+                $ List  [ Atom "quote"
+                        , List  [ List [Atom "quote", List [Number 2, Number 3]]
+                                , List [Atom "quote", List [Number 4, Number 5]]
+                                ]
+                        ]
 
         describe "Dotted list" $ do
-            it "of values" $ lispValue "(1 2 . 3)" $ DottedList [Number 1, Number 2] (Number 3)
+            it "of values" $ lispParse "(1 2 . 3)" $ DottedList [Number 1, Number 2] (Number 3)
 
         describe "Atom" $ do
-            it "identifier"  $ lispValue "hello" $ Atom "hello"
+            it "identifier"  $ lispParse "hello" $ Atom "hello"
 
         describe "toScheme" $ do
             it "is the inverse of readExpr" $ property $ \x -> readExpr (toScheme x) `shouldBe` Right x
@@ -167,7 +172,7 @@ main = hspec $ do
             it "number? returns True for Number"    $ lispValue "(number? 123)"     $ Bool True
             it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False
             it "number? returns False for others"   $ lispValue "(number? #t)"      $ Bool False
-            it "symbol? is True for identifiers"    $ lispValue "(symbol? hello)"   $ Bool True
+            it "symbol? is True for identifiers"    $ lispValue "(symbol? 'hello)"   $ Bool True
             it "symbol? is False for primitives"    $ lispValue "(symbol? 123)"     $ Bool False
             it "= is True for equal nums"           $ lispValue "(= 2 2)"           $ Bool True
             it "= is False for different nums"      $ lispValue "(= 2 3)"           $ Bool False
