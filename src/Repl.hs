@@ -27,11 +27,11 @@ until_ predicate prompt action = do
 
 runRepl :: IO ()
 runRepl = do
-    env <- nullEnv
+    env <- primitiveBindings
     until_ (== "quit") (readPrompt "Lisp>>> ") (evalAndPrint env)
 
 runOne :: String -> IO ()
-runOne str = nullEnv >>= flip evalAndPrint str
+runOne str = primitiveBindings >>= flip evalAndPrint str
 
 runIOThrows :: IOThrowsError String -> IO String
 runIOThrows action = extractValue $ trapError action

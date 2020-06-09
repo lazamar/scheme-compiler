@@ -8,10 +8,11 @@
 module Lisp where
 
 import Control.Monad.Except
+import Data.Bifunctor (second)
 import Data.Either (fromRight)
 import Data.Foldable (foldlM, asum)
 import Data.IORef
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Numeric (readOct, readHex)
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Text.Read (readMaybe)
@@ -78,6 +79,8 @@ toScheme = \case
     Char val        -> "#\\" <> [val] <> ""
     List contents   -> "(" ++ unwordsList contents ++ ")"
     DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ toScheme t ++ ")"
+    PrimitiveFunc _ -> "<primitive>"
+    Func{..}        -> "(lambda (" ++ unwords (map show params) ++ (maybe "" (" . " ++) vararg) ++ ") ...)"
 
 
 unwordsList :: [LispVal] -> String
@@ -233,6 +236,10 @@ type IOThrowsError = ExceptT LispError IO
 nullEnv :: IO Env
 nullEnv = newIORef []
 
+-- | An environment with primitives defined
+primitiveBindings :: IO Env
+primitiveBindings = nullEnv >>= (flip bindVars $ map (second PrimitiveFunc) primitives)
+
 liftThrows :: ThrowsError a -> IOThrowsError a
 liftThrows = either throwError return
 
@@ -284,50 +291,46 @@ eval env val = case val of
     Atom var -> getVar env var
     List [Atom "quote", v]  -> return v
     List [Atom "if", predicate, conseq, alt] -> ifFun predicate conseq alt
-    List (Atom "car"  : args)                -> car args
-    List (Atom "cdr"  : args)                -> cdr args
-    List (Atom "cons" : args)                -> cons args
-    List (Atom "eqv?" : args)                -> eqv args
-    List (Atom "eq?"  : args)                -> eqv args
-    List (Atom "equal?" : args)              -> equal args
     List (Atom "cond" : args)                -> cond args
     List [Atom "set!", Atom var, form]       -> eval' form >>= setVar env var
     List [Atom "define", Atom var, form]     -> eval' form >>= defineVar env var
-    List (Atom func   : args)                -> apply func =<< traverse eval' args
-    List (h:_)                               -> throwError $ TypeMismatch "function" h
-    List []                                  -> throwError $ Default "cannot evaluate empty list"
-    DottedList h t                           -> DottedList <$> (traverse eval' h) <*> (eval' t)
-    _                                        -> throwError $ BadSpecialForm "Unrecognised special form" val
+    List (Atom "eqv?" : args)                -> eqv args
+    List (Atom "eq?"  : args)                -> eqv args
+    List (Atom "equal?" : args)              -> equal args
+
+    List (Atom "define" : List (Atom var : params)               : body) -> makeNormalFunc env params body >>= defineVar env var
+    List (Atom "define" : DottedList (Atom var : params) varargs : body) -> makeVarArgs varargs env params body >>= defineVar env var
+    List (Atom "lambda" : List params                            : body) -> makeNormalFunc env params body
+    List (Atom "lambda" : DottedList params varargs              : body) -> makeVarArgs varargs env params body
+    List (Atom "lambda" : varargs@(Atom _)                       : body) -> makeVarArgs varargs env [] body
+
+    List (func : args) -> join $ apply <$> eval' func <*> traverse eval' args
+    DottedList h t     -> DottedList <$> (traverse eval' h) <*> (eval' t)
+    _                  -> throwError $ BadSpecialForm "Unrecognised special form" val
     where
         eval' = eval env
 
-        apply :: MonadLispError m => String -> [LispVal] -> m LispVal
-        apply func args = case lookup func primitives of
-            Nothing -> throwError $ NotFunction "Unrecognized primitive function args" func
-            Just f  -> f args
+        apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
+        apply func args = case func of
+            PrimitiveFunc f -> liftThrows $ f args
+            Func{..}           ->
+                if num params /= num args && isNothing vararg
+                   then throwError $ NumArgs (num params) args
+                   else (liftIO $ bindVars closure $ zip params args) >>= bindVarArgs >>= evalBody
+                where
+                    remainingArgs = drop (length params) args
+                    num = toInteger . length
+                    evalBody env' = last <$> traverse (eval env') body
+                    bindVarArgs env' = case vararg of
+                        Just argName -> liftIO $ bindVars env' [(argName, List $ remainingArgs)]
+                        Nothing -> return env'
+            _ -> throwError $ NotFunction "Trying to invoke a value that is not a function" (toScheme func)
 
         ifFun predicate conseq alt = eval' predicate >>= \case
             Bool False -> eval' alt
             Bool True -> eval' conseq
             arg       -> throwError $ TypeMismatch "boolean" arg
 
-        car = unary $ \case
-            List (Atom "quote":xs) -> car xs
-            List (x:_)             -> return x
-            DottedList (x:_) _     -> return x
-            badArg                 -> throwError $ TypeMismatch "pair" badArg
-
-        cdr = unary $ \case
-            List (Atom "quote":xs) -> cdr xs
-            List (_:xs)            -> return $ List xs
-            DottedList (_:xs) t    -> return $ if null xs then t else DottedList xs t
-            badArg                 -> throwError $ TypeMismatch "pair" badArg
-
-        cons = binary $ \new list -> case list of
-            List (Atom "quote":xs) -> cons (new:xs)
-            List xs                -> return $ List (new:xs)
-            DottedList xs t        -> return $ DottedList (new:xs) t
-            other                  -> return $ DottedList [new] other
 
         eqv = binary $ on return Bool eqv'
 
@@ -361,11 +364,9 @@ eval env val = case val of
 
                 _ -> throwError $ TypeMismatch "List" clause
 
-        dereference var = do
-            e <- liftIO $ readIORef env
-            case lookup var e of
-                Nothing  -> throwError $ UnboundVar "Undefined variable" var
-                Just val' -> liftIO $ readIORef val'
+        makeFunc varargs env' params body = return $ Func (map toScheme params) varargs body env'
+        makeNormalFunc = makeFunc Nothing
+        makeVarArgs    = makeFunc . Just . toScheme
 
 
 data Unpacker m = forall a. (Eq a) => AnyUnpacker (LispVal -> m a)
@@ -416,6 +417,9 @@ primitives =
     , ("string?"    , unary stringOp)
     , ("number?"    , unary numberOp)
     , ("symbol?"    , unary symbolOp)
+    , ("car"        , unary car     )
+    , ("cdr"        , unary cdr     )
+    , ("cons"       , binary cons   )
     ]
     where
 
@@ -436,6 +440,21 @@ primitives =
             args@[]  -> throwError $ NumArgs 2 args
             args@[_] -> throwError $ NumArgs 2 args
             arg:rest -> foldlM fun arg rest
+
+        car = \case
+            List (x:_)             -> return x
+            DottedList (x:_) _     -> return x
+            badArg                 -> throwError $ TypeMismatch "pair" badArg
+
+        cdr = \case
+            List (_:xs)            -> return $ List xs
+            DottedList (_:xs) t    -> return $ if null xs then t else DottedList xs t
+            badArg                 -> throwError $ TypeMismatch "pair" badArg
+
+        cons = \new list -> case list of
+            List xs                -> return $ List (new:xs)
+            DottedList xs t        -> return $ DottedList (new:xs) t
+            other                  -> return $ DottedList [new] other
 
 on :: MonadLispError m
    => (LispVal -> m a)

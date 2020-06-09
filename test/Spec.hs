@@ -1,21 +1,22 @@
 {-# LANGUAGE LambdaCase     #-}
 {-# LANGUAGE TupleSections  #-}
+{-# OPTIONS_GHC -Wno-orphans  #-}
+
+module Main where
 
 import Control.Monad.Except
 import Test.Hspec
-import Test.Hspec
-import Test.QuickCheck (oneof, Arbitrary(..), property, Gen, listOf, listOf1, elements, sized)
-import Lisp hiding (runLisp)
+import Test.QuickCheck (oneof, Arbitrary(..), property, listOf, listOf1, elements, sized)
+import Lisp
 import Text.ParserCombinators.Parsec hiding (spaces, oneOf)
 import Data.Bifunctor (first)
-import Debug.Trace
 import System.IO.Unsafe (unsafePerformIO)
 
 runLisp' :: String -> ThrowsError LispVal
 runLisp' str = do
     parsed <- first Parser $ parse parseExpr "lisp" str
     unsafePerformIO $ runExceptT $ do
-        env <- liftIO nullEnv
+        env <- liftIO primitiveBindings
         eval env parsed
 
 lispValue :: String -> LispVal -> Expectation
@@ -161,10 +162,19 @@ main = hspec $ do
                 it "recognises unequal values"          $ lispValue "(equal? 1 2)"              $ Bool False
 
         describe "define" $ do
-            it "returns the defined value" $ lispValue "(define a 2)" $ Number 2
-            it "allows us to use the value" $ lispValue "(+ (define a 2) a)" $ Number 4
-            it "doesn't do crazy recursion" $ lispThrows "(define a a)" isUnboundVar
-            it "expects only two arguments" $ lispThrows "(define a 2 3)" isUnboundVar
+            it "returns the defined value"      $ lispValue "(define a 2)"                         $ Number 2
+            it "allows us to use the value"     $ lispValue "(+ (define a 2) a)"                   $ Number 4
+            it "allows function definition"     $ lispValue "((define (f a b) (+ a b)) 2 3)"       $ Number 5
+            it "add functions to environment"   $ lispValue "((define (f a b) (+ a b)) 2 (f 1 2))" $ Number 5
+            it "doesn't do crazy recursion"     $ lispThrows "(define a a)" isUnboundVar
+            it "expects only two arguments"     $ lispThrows "(define a 2 3)" isUnboundVar
+            it "throws on wrong argument count" $ lispThrows "((define (f a b) (a b)) 2 3 4)" isNumArgs
+
+        describe "lambda" $ do
+            it "functions"                      $ lispValue "((lambda (a b) (+ a b)) 2 3)"     $ Number 5
+            it "polyvariadic functions"         $ lispValue "((lambda (a . b) b) 2 3 4)"       $ List [Number 3, Number 4]
+            it "polyvariadic functions no args" $ lispValue "((lambda args (cdr args)) 2 3 4)" $ List [Number 3, Number 4]
+            it "throws on wrong argument count" $ lispThrows "((lambda (a b) (a b)) 2 3 4)" isNumArgs
 
         describe "Primitive operations" $ do
             it "+ adds multiple numbers"            $ lispValue "(+ 1 2 3 4)"       $ Number 10
@@ -199,7 +209,7 @@ main = hspec $ do
             it "thrown when unary functions is applied to multiple values"  $ lispThrows "(number? 1 2 3)" isNumArgs
             it "thrown when binary function is applied to multiple values"  $ lispThrows "(number? 1 2 3)" isNumArgs
             it "thrown when numeric function is applied to non-number"      $ lispThrows "(+ 1 \"Hi\")"    isTypeMismatch
-            it "thrown when unknown function is used"                       $ lispThrows "(what? 1 4)"     isNotFunction
+            it "thrown when unknown function is used"                       $ lispThrows "(what? 1 4)"     isUnboundVar
             it "not thrown for nested computations"                         $ lispValue "(+ 1 (+ 2 3 4))" $ Number 10
 
 
