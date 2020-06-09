@@ -3,6 +3,7 @@
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE ConstraintKinds  #-}
+{-# LANGUAGE RecordWildCards  #-}
 
 module Lisp where
 
@@ -30,7 +31,41 @@ data LispVal
     | String String
     | Bool Bool
     | Char Char
-    deriving (Eq, Show)
+    | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
+    | Func
+        { params    :: [String]
+        , vararg    :: (Maybe String)
+        , body      :: [LispVal]
+        , closure   :: Env
+        }
+
+instance Eq LispVal where
+    (==) (Atom var1)        (Atom var2)         = var1 ==  var2
+    (==) (List l1)          (List l2)           = l1 ==  l2
+    (==) (DottedList h1 t1) (DottedList h2 t2)  = t1 == t2 && h1 == h2
+    (==) (Number n1)        (Number n2)         = n1 ==  n2
+    (==) (String s1)        (String s2)         = s1 ==  s2
+    (==) (Bool b1)          (Bool b2)           = b1 ==  b2
+    (==) (Char c1)          (Char c2)           = c1 ==  c2
+    (==) (PrimitiveFunc _)  _                   = False
+    (==) (Func _ _ _ _)     _                   = False
+    (==) _ _                                    = False
+
+instance Show LispVal where
+    show (Atom var) = "Atom \"" <> var <> "\""
+    show (List l) = "List (" <> show l <> ")"
+    show (DottedList h t) = "DottedList " <> show h <> " (" <> show t <> ")"
+    show (Number n) = "Number " <> show n
+    show (String s) = "String \"" <> show s <> "\""
+    show (Bool b) = "Bool " <> show b
+    show (Char c) = "Char '" <> show c <> "'"
+    show (PrimitiveFunc f) = "PrimitiveFunc <func>"
+    show (Func{..}) =
+        "Func { params = " <> show params
+         <> ", vararg = " <> show vararg
+         <> ", body = " <> show body
+         <> ", closure = <closure>"
+
 
 -- | This is the inverse of parsing
 toScheme :: LispVal -> String
@@ -231,7 +266,7 @@ defineVar envRef var value = do
              return value
 
 bindVars :: Env -> [(String, LispVal)] -> IO Env
-bindVars envRef bindings = readIORef envRef >>= extendEnv bindings >>= newIORef
+bindVars envRef binds = readIORef envRef >>= extendEnv binds >>= newIORef
     where
         extendEnv bindings env = (++ env) <$> (traverse addBinding bindings)
 
@@ -325,6 +360,13 @@ eval env val = case val of
                        else cond rest
 
                 _ -> throwError $ TypeMismatch "List" clause
+
+        dereference var = do
+            e <- liftIO $ readIORef env
+            case lookup var e of
+                Nothing  -> throwError $ UnboundVar "Undefined variable" var
+                Just val' -> liftIO $ readIORef val'
+
 
 data Unpacker m = forall a. (Eq a) => AnyUnpacker (LispVal -> m a)
 
