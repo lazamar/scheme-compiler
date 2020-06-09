@@ -3,3 +3,4 @@
 scheme-parser
 *.hi
 *.o
+tags
