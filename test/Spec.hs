@@ -117,7 +117,7 @@ main = hspec $ do
         describe "cond statement" $ do
             it "matches first clause"                  $ lispValue "(cond (#t 2))"          $ Number 2
             it "matches second clause"                 $ lispValue "(cond (#f 1) (#t 2))"   $ Number 2
-            it "evaluates predicates"                  $ lispValue "(cond ((eqv? 1 (- 5 4)) 1) (#t 2))" $ Number 2
+            it "evaluates predicates"                  $ lispValue "(cond ((eqv? 1 (- 5 4)) 1) (#t 2))" $ Number 1
             it "falls to else if no predicate is true" $ lispValue "(cond (#f 1) (else 2))" $ Number 2
             it "throws it there is no match or else "  $ lispThrows "(cond (#f 1))"         $ isDefault
 
@@ -230,7 +230,7 @@ instance Arbitrary LispVal where
                     maxDepth = 2
 
                     recursive =
-                        [ List <$> listOf next
+                        [ (\v -> List [Atom "quote", List v]) <$> listOf next
                         , DottedList <$> listOf1 next <*> next
                         ]
                     nonRecursive =
@@ -238,7 +238,9 @@ instance Arbitrary LispVal where
                         , String  <$> listOf charsAllowed
                         , Bool <$> arbitrary
                         , Char <$> charsAllowed
-                        , Atom <$> ((:) <$> letter <*> listOf (oneof [ letter, digit ]))
+
+                        -- No atoms to avoid random unbound variables
+                        --, Atom <$> ((:) <$> letter <*> listOf (oneof [ letter, digit ]))
                         ]
 
                     letter = elements $ ['a'..'z'] <> ['A'..'Z']

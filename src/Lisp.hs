@@ -294,9 +294,9 @@ eval env val = case val of
     List (Atom "cond" : args)                -> cond args
     List [Atom "set!", Atom var, form]       -> eval' form >>= setVar env var
     List [Atom "define", Atom var, form]     -> eval' form >>= defineVar env var
-    List (Atom "eqv?" : args)                -> eqv args
-    List (Atom "eq?"  : args)                -> eqv args
-    List (Atom "equal?" : args)              -> equal args
+    List (Atom "eqv?" : args)                -> eqv =<< traverse eval' args
+    List (Atom "eq?"  : args)                -> eqv =<< traverse eval' args
+    List (Atom "equal?" : args)              -> equal =<< traverse eval' args
 
     List (Atom "define" : List (Atom var : params)               : body) -> makeNormalFunc env params body >>= defineVar env var
     List (Atom "define" : DottedList (Atom var : params) varargs : body) -> makeVarArgs varargs env params body >>= defineVar env var
