@@ -30,8 +30,11 @@ runRepl = do
     env <- primitiveBindings
     until_ (== "quit") (readPrompt "Lisp>>> ") (evalAndPrint env)
 
-runOne :: String -> IO ()
-runOne str = primitiveBindings >>= flip evalAndPrint str
+runOne :: [String] -> IO ()
+runOne (file:args) = do
+    env <- primitiveBindings >>= flip bindVars [("args", List $ map String args)]
+    res <- runIOThrows $ fmap show . eval env $ List [Atom "load", String file]
+    hPutStrLn stderr res
 
 runIOThrows :: IOThrowsError String -> IO String
 runIOThrows action = extractValue $ trapError action

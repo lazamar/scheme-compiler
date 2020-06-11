@@ -1,9 +1,9 @@
-{-# LANGUAGE LambdaCase     #-}
-{-# LANGUAGE TupleSections  #-}
+
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE ConstraintKinds  #-}
 {-# LANGUAGE RecordWildCards  #-}
+{-# LANGUAGE LambdaCase  #-}
 
 module Lisp where
 
@@ -16,11 +16,16 @@ import Data.Maybe (isJust, isNothing)
 import Numeric (readOct, readHex)
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Text.Read (readMaybe)
+import System.IO
 
 readExpr :: String -> ThrowsError LispVal
-readExpr input = case parse parseExpr "lisp" input of
-     Left err  -> throwError $ Parser err
-     Right val -> return val
+readExpr = readOrThrow parseExpr
+
+readExprList :: String -> ThrowsError [LispVal]
+readExprList = readOrThrow (endBy parseExpr spaces)
+
+readOrThrow :: Parser a -> String -> ThrowsError a
+readOrThrow parser input = either (throwError . Parser) return $ parse parser "lisp" input
 
 -- Datatypes
 
@@ -33,6 +38,8 @@ data LispVal
     | Bool Bool
     | Char Char
     | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
+    | IOFunc ([LispVal] -> IOThrowsError LispVal)
+    | Port Handle
     | Func
         { params    :: [String]
         , vararg    :: (Maybe String)
@@ -61,6 +68,8 @@ instance Show LispVal where
     show (Bool b) = "Bool " <> show b
     show (Char c) = "Char '" <> show c <> "'"
     show (PrimitiveFunc f) = "PrimitiveFunc <func>"
+    show  (IOFunc _) = "<IO primitive>"
+    show  (Port _) = "<IO port>"
     show (Func{..}) =
         "Func { params = " <> show params
          <> ", vararg = " <> show vararg
@@ -80,6 +89,8 @@ toScheme = \case
     List contents   -> "(" ++ unwordsList contents ++ ")"
     DottedList h t  -> "(" ++ unwordsList h ++ " . " ++ toScheme t ++ ")"
     PrimitiveFunc _ -> "<primitive>"
+    IOFunc _        -> "<IO primitive>"
+    Port _          -> "<IO port>"
     Func{..}        -> "(lambda (" ++ unwords (map show params) ++ (maybe "" (" . " ++) vararg) ++ ") ...)"
 
 
@@ -238,7 +249,10 @@ nullEnv = newIORef []
 
 -- | An environment with primitives defined
 primitiveBindings :: IO Env
-primitiveBindings = nullEnv >>= (flip bindVars $ map (second PrimitiveFunc) primitives)
+primitiveBindings = nullEnv >>= (flip bindVars prim)
+    where
+        prim = map (second PrimitiveFunc) primitives
+            ++ map (second IOFunc) ioPrimitives
 
 liftThrows :: ThrowsError a -> IOThrowsError a
 liftThrows = either throwError return
@@ -297,6 +311,7 @@ eval env val = case val of
     List (Atom "eqv?" : args)                -> eqv =<< traverse eval' args
     List (Atom "eq?"  : args)                -> eqv =<< traverse eval' args
     List (Atom "equal?" : args)              -> equal =<< traverse eval' args
+    List [Atom "load", String filename]      -> load filename >>= fmap last . traverse eval'
 
     List (Atom "define" : List (Atom var : params)               : body) -> makeNormalFunc env params body >>= defineVar env var
     List (Atom "define" : DottedList (Atom var : params) varargs : body) -> makeVarArgs varargs env params body >>= defineVar env var
@@ -309,22 +324,6 @@ eval env val = case val of
     _                  -> throwError $ BadSpecialForm "Unrecognised special form" val
     where
         eval' = eval env
-
-        apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
-        apply func args = case func of
-            PrimitiveFunc f -> liftThrows $ f args
-            Func{..}           ->
-                if num params /= num args && isNothing vararg
-                   then throwError $ NumArgs (num params) args
-                   else (liftIO $ bindVars closure $ zip params args) >>= bindVarArgs >>= evalBody
-                where
-                    remainingArgs = drop (length params) args
-                    num = toInteger . length
-                    evalBody env' = last <$> traverse (eval env') body
-                    bindVarArgs env' = case vararg of
-                        Just argName -> liftIO $ bindVars env' [(argName, List $ remainingArgs)]
-                        Nothing -> return env'
-            _ -> throwError $ NotFunction "Trying to invoke a value that is not a function" (toScheme func)
 
         ifFun predicate conseq alt = eval' predicate >>= \case
             Bool False -> eval' alt
@@ -368,6 +367,23 @@ eval env val = case val of
         makeNormalFunc = makeFunc Nothing
         makeVarArgs    = makeFunc . Just . toScheme
 
+-- | Invoke a function
+apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
+apply func args = case func of
+    PrimitiveFunc f -> liftThrows $ f args
+    IOFunc f        -> f args
+    Func{..}           ->
+        if num params /= num args && isNothing vararg
+           then throwError $ NumArgs (num params) args
+           else (liftIO $ bindVars closure $ zip params args) >>= bindVarArgs >>= evalBody
+        where
+            remainingArgs = drop (length params) args
+            num = toInteger . length
+            evalBody env' = last <$> traverse (eval env') body
+            bindVarArgs env' = case vararg of
+                Just argName -> liftIO $ bindVars env' [(argName, List $ remainingArgs)]
+                Nothing -> return env'
+    _ -> throwError $ NotFunction "Trying to invoke a value that is not a function" (toScheme func)
 
 data Unpacker m = forall a. (Eq a) => AnyUnpacker (LispVal -> m a)
 
@@ -455,6 +471,55 @@ primitives =
             List xs                -> return $ List (new:xs)
             DottedList xs t        -> return $ DottedList (new:xs) t
             other                  -> return $ DottedList [new] other
+
+ioPrimitives :: [(String, [LispVal] -> IOThrowsError LispVal)]
+ioPrimitives =
+    [ ("apply", applyProc)
+    , ("open-input-file", unary $ makePort ReadMode)
+    , ("open-output-file",unary $ makePort WriteMode)
+    , ("close-input-port", unary closePort)
+    , ("close-output-port", unary closePort)
+    , ("read", readProc)
+    , ("write", writeProc)
+    , ("read-contents", unary readContents)
+    , ("read-all", unary readAll)
+    ]
+    where
+        applyProc = \case
+            [func, List args] -> apply func args
+            (func:args)       -> apply func args
+
+        makePort mode = \case
+            String filename -> Port <$> liftIO (openFile filename mode)
+            val -> throwError $ TypeMismatch "String" val
+
+        closePort = \case
+            Port port -> liftIO $ hClose port >> (return $ Bool True)
+            _         -> return $ Bool False
+
+        readProc = \case
+            []          -> readProc [Port stdin]
+            [Port port] -> do
+                expr <- liftIO $ hGetLine port
+                liftThrows $ readExpr expr
+
+        writeProc = \case
+            [obj]            -> writeProc [obj, Port stdout]
+            [obj, Port port] -> liftIO $ hPrint port obj >> (return $ Bool True)
+            []               -> throwError $ NumArgs 1 []
+            val:_            -> throwError $ BadSpecialForm "Unexpected" val
+
+        readContents = \case
+            String filename -> liftM String $ liftIO $ readFile filename
+            val             -> throwError $ TypeMismatch "String" val
+
+        readAll = \case
+            String filename -> List <$> load filename
+            val             -> throwError $ TypeMismatch "String" val
+
+-- | Read all expressions in a file
+load :: String -> IOThrowsError [LispVal]
+load filename = (liftIO $ readFile filename) >>= liftThrows . readExprList
 
 on :: MonadLispError m
    => (LispVal -> m a)
